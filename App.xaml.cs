@@ -6,18 +6,24 @@ namespace OfficeChat;
 
 public partial class App : Application
 {
-    // Не даём запустить вторую копию на одном компьютере: обе заняли бы один и тот же UDP-порт.
+    private const string InstanceMutexName = @"Local\OfficeChat.SingleInstance";
+    private const string ShowWindowEventName = @"Local\OfficeChat.ShowWindow";
+
+    // Не даём запустить вторую копию на одном компьютере: обе заняли бы одни и те же порты.
     private static Mutex? _singleInstance;
+    private EventWaitHandle? _showWindowSignal;
+    private Views.MainWindow? _mainWindow;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
-        _singleInstance = new Mutex(true, @"Local\OfficeChat.SingleInstance", out var isFirst);
+        _singleInstance = new Mutex(true, InstanceMutexName, out var isFirst);
+        _showWindowSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
         if (!isFirst)
         {
-            MessageBox.Show("OfficeChat уже запущен.", "OfficeChat",
-                MessageBoxButton.OK, MessageBoxImage.Information);
+            // Программа уже работает (возможно, свёрнута в трей) — просим её показать окно.
+            _showWindowSignal.Set();
             Shutdown();
             return;
         }
@@ -25,8 +31,6 @@ public partial class App : Application
         var settings = SettingsService.Load();
         if (string.IsNullOrWhiteSpace(settings.DisplayName))
         {
-            // Окно имени показывается до главного, поэтому временно не завершаем приложение при его закрытии.
-            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             var nameWindow = new NameWindow(Environment.UserName);
             if (nameWindow.ShowDialog() != true)
             {
@@ -35,15 +39,27 @@ public partial class App : Application
             }
             settings.DisplayName = nameWindow.EnteredName;
             SettingsService.Save(settings);
-            ShutdownMode = ShutdownMode.OnMainWindowClose;
         }
 
-        MainWindow = new MainWindow(settings);
-        MainWindow.Show();
+        _mainWindow = new Views.MainWindow(settings);
+        MainWindow = _mainWindow;
+        _mainWindow.Show();
+
+        ThreadPool.RegisterWaitForSingleObject(_showWindowSignal,
+            (_, _) => Dispatcher.BeginInvoke(() => _mainWindow?.ShowFromTray()),
+            null, Timeout.Infinite, executeOnlyOnce: false);
+    }
+
+    protected override void OnSessionEnding(SessionEndingCancelEventArgs e)
+    {
+        // При выходе из Windows закрываемся по-настоящему, а не в трей.
+        _mainWindow?.ExitApplication();
+        base.OnSessionEnding(e);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _showWindowSignal?.Dispose();
         _singleInstance?.Dispose();
         base.OnExit(e);
     }

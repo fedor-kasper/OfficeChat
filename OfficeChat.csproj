@@ -5,10 +5,18 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
+    <!-- WinForms нужен только для значка в трее (NotifyIcon) -->
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Позволяет собирать проект не только на Windows (например, в CI) -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyTitle>Office Chat</AssemblyTitle>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Иначе типы WinForms (Application, MessageBox, ...) конфликтуют с WPF -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
 </Project>

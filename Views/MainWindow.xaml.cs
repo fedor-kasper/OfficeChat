@@ -12,21 +12,35 @@ public partial class MainWindow : Window
 {
     private readonly AppSettings _settings;
     private readonly ChatService _chat;
+    private readonly NotificationManager _notifications;
+    private readonly TrayIcon _tray;
     private Contact? _current;
+    private bool _exiting;
+    private bool _trayHintShown;
 
     public MainWindow(AppSettings settings)
     {
         InitializeComponent();
+        Icon = AppIcon.CreateImageSource();
         _settings = settings;
         MyNameText.Text = settings.DisplayName;
 
         _chat = new ChatService(settings)
         {
             IsConversationVisible = contact =>
-                contact == _current && IsActive && WindowState != WindowState.Minimized,
+                contact == _current && IsVisible && IsActive && WindowState != WindowState.Minimized,
         };
         _chat.PresenceChanged += OnPresenceChanged;
+        _chat.MessageReceived += OnMessageReceived;
         ContactsList.ItemsSource = _chat.Contacts;
+
+        _notifications = new NotificationManager(_chat, OpenConversation);
+
+        _tray = new TrayIcon();
+        _tray.OpenRequested += ShowFromTray;
+        _tray.ExitRequested += ExitApplication;
+        _chat.UnreadChanged += () => _tray.SetUnread(_chat.TotalUnread);
+
         _chat.Start();
 
         Activated += (_, _) =>
@@ -42,6 +56,40 @@ public partial class MainWindow : Window
         var count = _chat.OnlineCount;
         OnlineCountText.Text = count == 0 ? "В СЕТИ НИКОГО НЕТ" : $"В СЕТИ: {count}";
         UpdateChatHeader();
+    }
+
+    private void OnMessageReceived(Contact contact, ChatMessage message)
+    {
+        // Если эта переписка уже открыта перед глазами — всплывать незачем.
+        if (!_chat.IsConversationVisible(contact))
+            _notifications.Show(contact, message);
+    }
+
+    // ---- Трей и всплывающие окна ----
+
+    /// <summary>Показывает окно (в том числе из трея) и открывает переписку.</summary>
+    public void OpenConversation(Contact contact)
+    {
+        ShowFromTray();
+        ContactsList.SelectedItem = contact;
+        ContactsList.ScrollIntoView(contact);
+    }
+
+    public void ShowFromTray()
+    {
+        Show();
+        if (WindowState == WindowState.Minimized)
+            WindowState = WindowState.Normal;
+        Activate();
+        if (_current != null)
+            _notifications.CloseFor(_current);
+    }
+
+    /// <summary>Настоящий выход (из меню трея или при завершении работы Windows).</summary>
+    public void ExitApplication()
+    {
+        _exiting = true;
+        Close();
     }
 
     // ---- Выбор собеседника ----
@@ -75,6 +123,7 @@ public partial class MainWindow : Window
         UpdateMessagesHint();
         MessagesScroll.ScrollToEnd();
         _chat.MarkRead(_current);
+        _notifications.CloseFor(_current);
         InputBox.Focus();
     }
 
@@ -195,7 +244,26 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
-        _chat.Dispose();
         base.OnClosing(e);
+        if (_exiting) return;
+
+        // Крестик не закрывает программу, а убирает её в трей — сообщения продолжают приходить.
+        e.Cancel = true;
+        Hide();
+        if (!_trayHintShown)
+        {
+            _trayHintShown = true;
+            _tray.ShowHint("OfficeChat работает в фоне",
+                "Новые сообщения всплывут слева внизу. Чтобы выйти, нажмите на значок правой кнопкой → «Выход».");
+        }
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _notifications.CloseAll();
+        _chat.Dispose();
+        _tray.Dispose();
+        base.OnClosed(e);
+        Application.Current.Shutdown();
     }
 }

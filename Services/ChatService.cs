@@ -29,6 +29,9 @@ public sealed class ChatService : IDisposable
     /// <summary>Пришло новое входящее сообщение.</summary>
     public event Action<Contact, ChatMessage>? MessageReceived;
 
+    /// <summary>Изменилось общее число непрочитанных.</summary>
+    public event Action? UnreadChanged;
+
     /// <summary>Кто-то появился в сети или ушёл.</summary>
     public event Action? PresenceChanged;
 
@@ -37,6 +40,8 @@ public sealed class ChatService : IDisposable
     /// Задаёт окно.
     /// </summary>
     public Func<Contact, bool> IsConversationVisible { get; set; } = _ => false;
+
+    public int TotalUnread => _contactsByPeer.Values.Sum(c => c.UnreadCount);
 
     public int OnlineCount => _contactsByPeer.Values.Count(c => c.IsOnline);
 
@@ -107,7 +112,11 @@ public sealed class ChatService : IDisposable
             message.IsRead = true;
             changed = true;
         }
-        contact.UnreadCount = 0;
+        if (contact.UnreadCount != 0)
+        {
+            contact.UnreadCount = 0;
+            UnreadChanged?.Invoke();
+        }
 
         if (changed)
             _ = FlushAsync(contact);
@@ -239,7 +248,10 @@ public sealed class ChatService : IDisposable
         if (IsConversationVisible(contact))
             MarkRead(contact);
         else
+        {
             contact.UnreadCount++;
+            UnreadChanged?.Invoke();
+        }
 
         MessageReceived?.Invoke(contact, message);
     }
