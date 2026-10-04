@@ -179,6 +179,15 @@ public sealed class ChatService : IDisposable
         return recipients.Count;
     }
 
+    /// <summary>Личный ответ собеседнику (например, из всплывающего окна). Возвращает созданное сообщение.</summary>
+    public ChatMessage Reply(Contact contact, string text)
+    {
+        var message = Enqueue(contact, text, isBroadcast: false);
+        // Раз ответил — значит, прочитал.
+        MarkRead(contact);
+        return message;
+    }
+
     /// <summary>Отменяет отправку сообщения, которое ещё ждёт в очереди.</summary>
     public bool Cancel(ChatMessage message)
     {
@@ -214,7 +223,7 @@ public sealed class ChatService : IDisposable
             _ = FlushAsync(contact);
     }
 
-    private void Enqueue(Contact contact, string text, bool isBroadcast)
+    private ChatMessage Enqueue(Contact contact, string text, bool isBroadcast)
     {
         var message = new ChatMessage
         {
@@ -230,6 +239,7 @@ public sealed class ChatService : IDisposable
         _store.SaveContact(contact.Peer!);
         Save(contact, message);
         _ = FlushAsync(contact);
+        return message;
     }
 
     private void FlushAll()

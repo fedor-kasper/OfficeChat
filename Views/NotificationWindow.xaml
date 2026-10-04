@@ -7,6 +7,32 @@
         ResizeMode="NoResize" Topmost="True" ShowInTaskbar="False" ShowActivated="False"
         Opacity="0">
     <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <!-- Строка в ленте окна: входящие — слева, ваши ответы — справа со статусом -->
+        <DataTemplate x:Key="PopupMessageTemplate">
+            <Border x:Name="Bubble" Margin="0,3" Padding="10,6,10,5" CornerRadius="8" MaxWidth="340"
+                    HorizontalAlignment="Left" Background="#EFF6FF">
+                <StackPanel>
+                    <TextBlock Text="сообщение всем" FontSize="10" Foreground="{StaticResource MutedTextBrush}"
+                               Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Text="{Binding Text}" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
+                    <DockPanel Margin="0,2,0,0">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="8,0,0,0"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock Text="{Binding StatusText}" FontSize="10" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsOutgoing}" Value="True">
+                    <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
+                    <Setter TargetName="Bubble" Property="Background" Value="#DBEAFE" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
         <LinearGradientBrush x:Key="HeaderBrush" StartPoint="0,0" EndPoint="1,0">
             <GradientStop Color="#2563EB" Offset="0" />
             <GradientStop Color="#3B82F6" Offset="1" />
@@ -57,21 +83,22 @@
                     <Button DockPanel.Dock="Right" Content="✕" Width="28" Height="28" FontSize="14"
                             VerticalAlignment="Top" Style="{StaticResource FlatButton}" Background="Transparent"
                             ToolTip="Закрыть" Click="Close_Click" />
-                    <TextBlock x:Name="TimeText" DockPanel.Dock="Right" Margin="8,0,6,0" FontSize="12"
+                    <TextBlock x:Name="CountText" DockPanel.Dock="Right" Margin="8,0,6,0" FontSize="12"
                                VerticalAlignment="Center" Foreground="#DBEAFE" />
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock x:Name="SenderText" FontSize="17" FontWeight="SemiBold" Foreground="White"
                                    TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="BroadcastText" Text="сообщение всем" FontSize="11"
-                                   Foreground="#DBEAFE" Visibility="Collapsed" />
+                        <TextBlock Text="новое сообщение" FontSize="11" Foreground="#DBEAFE" />
                     </StackPanel>
                 </DockPanel>
             </Border>
 
-            <!-- Текст сообщения -->
-            <TextBlock x:Name="MessageText" Margin="16,12,16,0" FontSize="15" TextWrapping="Wrap"
-                       TextTrimming="CharacterEllipsis" MaxHeight="120" Foreground="#111827"
-                       Cursor="Hand" MouseLeftButtonUp="Open_Click" ToolTip="Открыть переписку" />
+            <!-- Лента: все непросмотренные сообщения от этого человека и ваши ответы -->
+            <ScrollViewer x:Name="MessagesScroll" Margin="12,10,12,0" MaxHeight="260"
+                          VerticalScrollBarVisibility="Auto" Cursor="Hand"
+                          MouseLeftButtonUp="Open_Click" ToolTip="Открыть переписку">
+                <ItemsControl x:Name="MessagesList" ItemTemplate="{StaticResource PopupMessageTemplate}" />
+            </ScrollViewer>
 
             <!-- Быстрый ответ -->
             <DockPanel Margin="16,12,16,14">

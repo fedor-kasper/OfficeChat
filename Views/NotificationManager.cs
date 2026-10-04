@@ -7,7 +7,12 @@ namespace OfficeChat.Views;
 /// <summary>Складывает всплывающие окна стопкой снизу вверх в правом нижнем углу экрана.</summary>
 public sealed class NotificationManager
 {
-    private const int MaxVisible = 4;
+    /// <summary>
+    /// Окна висят, пока их не закроют, поэтому на каждого собеседника — одно окно.
+    /// Если одновременно пишут больше людей, самое старое окно убирается
+    /// (сообщения при этом остаются непрочитанными в главном окне).
+    /// </summary>
+    private const int MaxVisible = 5;
 
     private readonly ChatService _chat;
     private readonly Action<Contact> _openConversation;
@@ -23,19 +28,21 @@ public sealed class NotificationManager
 
     public void Show(Contact contact, ChatMessage message)
     {
+        // Этот человек уже висит на экране — дописываем в его окно.
+        var existing = _windows.FirstOrDefault(w => w.Contact == contact && !w.IsClosing);
+        if (existing != null)
+        {
+            existing.AddMessage(message);
+            return;
+        }
+
         var window = new NotificationWindow(contact, message);
         window.OpenRequested += w =>
         {
             w.FadeOutAndClose();
             _openConversation(w.Contact);
         };
-        window.ReplyRequested += (w, text) =>
-        {
-            _chat.Send(w.Contact, text);
-            // Раз ответил — значит, прочитал.
-            _chat.MarkRead(w.Contact);
-            w.FadeOutAndClose();
-        };
+        window.ReplyRequested += (w, text) => w.AddMessage(_chat.Reply(w.Contact, text));
         window.SizeChanged += (_, _) => Layout();
         window.Closed += (_, _) =>
         {
@@ -45,7 +52,6 @@ public sealed class NotificationManager
 
         _windows.Add(window);
 
-        // Лишние старые окна убираем, чтобы стопка не росла бесконечно.
         foreach (var old in _windows.Where(w => !w.IsClosing).SkipLast(MaxVisible).ToList())
             old.FadeOutAndClose();
 
