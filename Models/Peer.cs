@@ -10,6 +10,7 @@ public sealed class Peer : INotifyPropertyChanged
     private string _name = "";
     private string _machine = "";
     private IPAddress _address = IPAddress.None;
+    private bool _isOnline;
 
     public required Guid Id { get; init; }
 
@@ -29,6 +30,12 @@ public sealed class Peer : INotifyPropertyChanged
     {
         get => _address;
         set => Set(ref _address, value);
+    }
+
+    public bool IsOnline
+    {
+        get => _isOnline;
+        set => Set(ref _isOnline, value);
     }
 
     public DateTime LastSeen { get; set; }

@@ -23,11 +23,11 @@ public sealed class DiscoveryService : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private UdpClient? _udp;
 
-    /// <summary>Появился новый компьютер (вызывается в UI-потоке).</summary>
-    public event Action<Peer>? PeerAdded;
+    /// <summary>Компьютер появился в сети или вернулся (вызывается в UI-потоке).</summary>
+    public event Action<Peer>? PeerOnline;
 
     /// <summary>Компьютер ушёл из сети или закрыл программу (вызывается в UI-потоке).</summary>
-    public event Action<Peer>? PeerRemoved;
+    public event Action<Peer>? PeerOffline;
 
     public DiscoveryService(AppSettings settings)
     {
@@ -92,34 +92,49 @@ public sealed class DiscoveryService : IDisposable
     {
         if (packet.Type == DiscoveryPacket.Bye)
         {
-            if (_peers.Remove(packet.Id, out var gone))
-                PeerRemoved?.Invoke(gone);
+            if (_peers.TryGetValue(packet.Id, out var gone))
+                MarkOffline(gone);
             return;
         }
 
-        if (_peers.TryGetValue(packet.Id, out var peer))
-        {
-            peer.Name = packet.Name;
-            peer.Machine = packet.Machine;
-            peer.Address = from;
-            peer.LastSeen = DateTime.UtcNow;
-            return;
-        }
-
-        peer = new Peer
-        {
-            Id = packet.Id,
-            Name = packet.Name,
-            Machine = packet.Machine,
-            Address = from,
-            LastSeen = DateTime.UtcNow,
-        };
-        _peers.Add(peer.Id, peer);
-        PeerAdded?.Invoke(peer);
+        var cameOnline = Observe(packet.Id, packet.Name, packet.Machine, from);
 
         // Новичку отвечаем напрямую, чтобы он увидел нас сразу, не дожидаясь нашей рассылки.
-        if (packet.Type == DiscoveryPacket.Hello)
+        if (cameOnline && packet.Type == DiscoveryPacket.Hello)
             Send(CreatePacket(DiscoveryPacket.Reply), new IPEndPoint(from, DiscoveryPort));
+    }
+
+    /// <summary>
+    /// Отмечает, что компьютер точно в сети (пришёл пакет обнаружения или сообщение).
+    /// Возвращает true, если он только что появился. Вызывать только из UI-потока.
+    /// </summary>
+    public bool Observe(Guid id, string name, string machine, IPAddress from)
+    {
+        if (!_peers.TryGetValue(id, out var peer))
+        {
+            peer = new Peer { Id = id };
+            _peers.Add(id, peer);
+        }
+
+        if (!string.IsNullOrWhiteSpace(name)) peer.Name = name;
+        if (!string.IsNullOrWhiteSpace(machine)) peer.Machine = machine;
+        peer.Address = from;
+        peer.LastSeen = DateTime.UtcNow;
+
+        if (peer.IsOnline) return false;
+        peer.IsOnline = true;
+        PeerOnline?.Invoke(peer);
+        return true;
+    }
+
+    /// <summary>Компьютер по идентификатору (в том числе ушедший из сети), если он уже встречался.</summary>
+    public Peer? Find(Guid id) => _peers.GetValueOrDefault(id);
+
+    private void MarkOffline(Peer peer)
+    {
+        if (!peer.IsOnline) return;
+        peer.IsOnline = false;
+        PeerOffline?.Invoke(peer);
     }
 
     private void RemoveStalePeers()
@@ -127,11 +142,8 @@ public sealed class DiscoveryService : IDisposable
         _uiContext.Post(_ =>
         {
             var deadline = DateTime.UtcNow - PeerTimeout;
-            foreach (var stale in _peers.Values.Where(p => p.LastSeen < deadline).ToList())
-            {
-                _peers.Remove(stale.Id);
-                PeerRemoved?.Invoke(stale);
-            }
+            foreach (var stale in _peers.Values.Where(p => p.IsOnline && p.LastSeen < deadline).ToList())
+                MarkOffline(stale);
         }, null);
     }
 
