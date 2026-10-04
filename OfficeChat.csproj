@@ -1,10 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Позволяет собирать проект не только на Windows (например, в CI) -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AssemblyTitle>Office Chat</AssemblyTitle>
   </PropertyGroup>
 
 </Project>
