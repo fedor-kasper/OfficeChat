@@ -4,7 +4,7 @@ using OfficeChat.Services;
 
 namespace OfficeChat.Views;
 
-/// <summary>Складывает всплывающие окна стопкой снизу вверх в левом нижнем углу экрана.</summary>
+/// <summary>Складывает всплывающие окна стопкой снизу вверх в правом нижнем углу экрана.</summary>
 public sealed class NotificationManager
 {
     private const int MaxVisible = 4;
@@ -50,7 +50,7 @@ public sealed class NotificationManager
             old.FadeOutAndClose();
 
         var area = SystemParameters.WorkArea;
-        window.Left = area.Left;
+        window.Left = area.Right - window.Width;
         window.Top = area.Bottom;
         window.Show();
         Layout();
@@ -75,7 +75,7 @@ public sealed class NotificationManager
         var bottom = area.Bottom;
         foreach (var window in _windows)
         {
-            window.Left = area.Left;
+            window.Left = area.Right - window.ActualWidth;
             window.Top = bottom - window.ActualHeight;
             bottom = window.Top;
         }

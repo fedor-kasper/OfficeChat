@@ -34,6 +34,7 @@ public partial class NotificationWindow : Window
         Contact = contact;
 
         SenderText.Text = contact.Title;
+        AvatarText.Text = contact.Title.Length > 0 ? char.ToUpper(contact.Title[0]).ToString() : "?";
         TimeText.Text = message.TimeText;
         MessageText.Text = message.Text;
         BroadcastText.Visibility = message.IsBroadcast ? Visibility.Visible : Visibility.Collapsed;

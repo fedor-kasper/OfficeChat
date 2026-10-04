@@ -61,3 +61,6 @@
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
+
+# Пакетные файлы Windows должны иметь CRLF
+*.cmd text eol=crlf
