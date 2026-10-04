@@ -10,6 +10,9 @@ public sealed class AppSettings
 
     /// <summary>Имя, которое видят остальные.</summary>
     public string DisplayName { get; set; } = "";
+
+    /// <summary>Запускаться вместе с Windows (сразу в трей).</summary>
+    public bool AutoStart { get; set; } = true;
 }
 
 /// <summary>Хранит настройки в %AppData%\OfficeChat\settings.json.</summary>

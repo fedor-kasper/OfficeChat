@@ -117,6 +117,7 @@ public partial class MainWindow : Window
 
         EmptyPanel.Visibility = Visibility.Collapsed;
         ChatPanel.Visibility = Visibility.Visible;
+        ChatPanel.DataContext = _current;
         MessagesList.ItemsSource = _current.Messages;
 
         UpdateChatHeader();
@@ -132,7 +133,8 @@ public partial class MainWindow : Window
     private void OnCurrentMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
         UpdateMessagesHint();
-        if (e.Action == NotifyCollectionChangedAction.Add)
+        // Новое сообщение в конце — прокручиваем вниз; подгрузка старых вставляет в начало и не прокручивает.
+        if (e.Action == NotifyCollectionChangedAction.Add && e.NewStartingIndex == _current!.Messages.Count - 1)
             MessagesScroll.ScrollToEnd();
     }
 
@@ -231,15 +233,85 @@ public partial class MainWindow : Window
 
     // ---- Прочее ----
 
-    private void ChangeName_Click(object sender, RoutedEventArgs e)
+    private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new NameWindow(_settings.DisplayName) { Owner = this };
+        var dialog = new SettingsWindow(_settings.DisplayName, _settings.AutoStart) { Owner = this };
         if (dialog.ShowDialog() != true) return;
 
         _settings.DisplayName = dialog.EnteredName;
+        _settings.AutoStart = dialog.AutoStart;
         SettingsService.Save(_settings);
+        AutoStartService.Apply(_settings.AutoStart);
         MyNameText.Text = _settings.DisplayName;
         _chat.AnnounceNow();
+    }
+
+    // ---- История и управление контактами ----
+
+    private void LoadOlder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current == null) return;
+
+        // Сохраняем позицию, чтобы после вставки сверху остаться на том же сообщении.
+        var distanceFromBottom = MessagesScroll.ExtentHeight - MessagesScroll.VerticalOffset;
+        _chat.LoadOlder(_current);
+        MessagesScroll.UpdateLayout();
+        MessagesScroll.ScrollToVerticalOffset(MessagesScroll.ExtentHeight - distanceFromBottom);
+    }
+
+    private void ClearConversation_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current != null) ConfirmClear(_current);
+    }
+
+    private void RemoveContact_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current != null) ConfirmRemove(_current);
+    }
+
+    private void ContactsList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
+    {
+        var contact = (e.OriginalSource as FrameworkElement)?.DataContext as Contact;
+        if (contact == null || contact.IsEveryone)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        var clear = new MenuItem { Header = "Очистить переписку", IsEnabled = contact.Messages.Count > 0 };
+        clear.Click += (_, _) => ConfirmClear(contact);
+
+        var remove = new MenuItem
+        {
+            Header = "Удалить из списка",
+            IsEnabled = contact.CanRemove,
+            ToolTip = contact.CanRemove ? null : "Можно удалить только того, кто не в сети",
+        };
+        ToolTipService.SetShowOnDisabled(remove, true);
+        remove.Click += (_, _) => ConfirmRemove(contact);
+
+        ContactsList.ContextMenu = new ContextMenu { Items = { clear, remove } };
+    }
+
+    private void ConfirmClear(Contact contact)
+    {
+        var hasQueued = contact.Messages.Any(m => m.CanCancel);
+        var text = $"Удалить всю переписку с «{contact.Title}» на этом компьютере?" +
+                   (hasQueued ? "\n\nНеотправленные сообщения тоже будут отменены." : "") +
+                   "\n\nУ собеседника переписка останется.";
+        if (MessageBox.Show(this, text, "Очистить переписку", MessageBoxButton.YesNo,
+                MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes)
+            _chat.ClearConversation(contact);
+    }
+
+    private void ConfirmRemove(Contact contact)
+    {
+        if (!contact.CanRemove) return;
+        var text = $"Убрать «{contact.Title}» из списка вместе со всей перепиской?\n\n" +
+                   "Если этот компьютер снова появится в сети, он вернётся в список.";
+        if (MessageBox.Show(this, text, "Удалить из списка", MessageBoxButton.YesNo,
+                MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes)
+            _chat.RemoveContact(contact);
     }
 
     protected override void OnClosing(CancelEventArgs e)

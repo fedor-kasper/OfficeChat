@@ -3,15 +3,18 @@ using System.Windows.Controls;
 
 namespace OfficeChat.Views;
 
-public partial class NameWindow : Window
+public partial class SettingsWindow : Window
 {
     public string EnteredName => NameBox.Text.Trim();
 
-    public NameWindow(string initialName)
+    public bool AutoStart => AutoStartBox.IsChecked == true;
+
+    public SettingsWindow(string initialName, bool autoStart)
     {
         InitializeComponent();
         NameBox.Text = initialName;
         NameBox.SelectAll();
+        AutoStartBox.IsChecked = autoStart;
     }
 
     private void NameBox_TextChanged(object sender, TextChangedEventArgs e) =>

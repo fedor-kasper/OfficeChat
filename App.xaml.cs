@@ -31,19 +31,23 @@ public partial class App : Application
         var settings = SettingsService.Load();
         if (string.IsNullOrWhiteSpace(settings.DisplayName))
         {
-            var nameWindow = new NameWindow(Environment.UserName);
-            if (nameWindow.ShowDialog() != true)
+            var settingsWindow = new SettingsWindow(Environment.UserName, settings.AutoStart);
+            if (settingsWindow.ShowDialog() != true)
             {
                 Shutdown();
                 return;
             }
-            settings.DisplayName = nameWindow.EnteredName;
+            settings.DisplayName = settingsWindow.EnteredName;
+            settings.AutoStart = settingsWindow.AutoStart;
             SettingsService.Save(settings);
         }
+        AutoStartService.Apply(settings.AutoStart);
 
         _mainWindow = new Views.MainWindow(settings);
         MainWindow = _mainWindow;
-        _mainWindow.Show();
+        // При автозапуске с Windows окно не показываем — программа сразу работает в трее.
+        if (!e.Args.Contains(AutoStartService.TrayArgument))
+            _mainWindow.Show();
 
         ThreadPool.RegisterWaitForSingleObject(_showWindowSignal,
             (_, _) => Dispatcher.BeginInvoke(() => _mainWindow?.ShowFromTray()),

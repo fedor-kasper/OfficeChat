@@ -7,17 +7,20 @@ namespace OfficeChat.Services;
 
 /// <summary>
 /// Логика чата поверх сети: список контактов, очередь неотправленных сообщений,
-/// статусы «доставлено/прочитано», повторные попытки. Работает в UI-потоке.
+/// статусы «доставлено/прочитано», повторные попытки, история. Работает в UI-потоке.
 /// </summary>
 public sealed class ChatService : IDisposable
 {
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
 
+    /// <summary>Сколько последних сообщений показывать сразу (и подгружать по кнопке).</summary>
+    private const int PageSize = 200;
+
     private readonly AppSettings _settings;
+    private readonly HistoryStore _store;
     private readonly DiscoveryService _discovery;
     private readonly MessagingService _messaging;
     private readonly Dictionary<Guid, Contact> _contactsByPeer = new();
-    private readonly HashSet<Guid> _receivedMessageIds = new();
     private readonly HashSet<Guid> _flushing = new();
     private readonly DispatcherTimer _retryTimer;
 
@@ -48,6 +51,7 @@ public sealed class ChatService : IDisposable
     public ChatService(AppSettings settings)
     {
         _settings = settings;
+        _store = new HistoryStore();
         Contacts.Add(Everyone);
 
         _discovery = new DiscoveryService(settings);
@@ -59,6 +63,8 @@ public sealed class ChatService : IDisposable
 
         _retryTimer = new DispatcherTimer { Interval = RetryInterval };
         _retryTimer.Tick += (_, _) => FlushAll();
+
+        LoadHistory();
     }
 
     public void Start()
@@ -70,6 +76,90 @@ public sealed class ChatService : IDisposable
 
     /// <summary>Сразу разослать актуальные данные о себе (после смены имени).</summary>
     public void AnnounceNow() => _discovery.AnnounceNow();
+
+    // ---- История ----
+
+    private void LoadHistory()
+    {
+        foreach (var stored in _store.LoadContacts())
+        {
+            var peer = _discovery.AddKnown(stored.Id, stored.Name, stored.Machine, stored.Address);
+            var contact = GetOrAddContact(peer);
+
+            // Последние сообщения + всё, с чем ещё есть работа (очередь, непрочитанные), даже если оно старее.
+            var recent = _store.LoadRecent(peer.Id, PageSize);
+            var pending = _store.LoadPending(peer.Id);
+            var messages = recent.Concat(pending.Where(p => recent.All(r => r.Id != p.Id)))
+                .OrderBy(m => m.Timestamp)
+                .ToList();
+
+            foreach (var message in messages)
+            {
+                if (message.CanCancel) message.PeerOffline = true;
+                contact.Messages.Add(message);
+            }
+            contact.HasOlderMessages = recent.Count == PageSize;
+            contact.UnreadCount = messages.Count(m => !m.IsOutgoing && !m.IsRead);
+            RemoveIfForgotten(contact);
+        }
+    }
+
+    /// <summary>Подгружает в окно следующую порцию более ранних сообщений.</summary>
+    public void LoadOlder(Contact contact)
+    {
+        if (contact.IsEveryone || contact.Messages.Count == 0) return;
+
+        var older = _store.LoadRecent(contact.Peer!.Id, PageSize, contact.Messages[0].Timestamp);
+        var loaded = contact.Messages.Select(m => m.Id).ToHashSet();
+        var index = 0;
+        foreach (var message in older.Where(m => !loaded.Contains(m.Id)))
+            contact.Messages.Insert(index++, message);
+        contact.HasOlderMessages = older.Count == PageSize;
+    }
+
+    /// <summary>Удаляет всю переписку с собеседником (вместе с неотправленными сообщениями).</summary>
+    public void ClearConversation(Contact contact)
+    {
+        if (contact.IsEveryone) return;
+
+        _store.DeleteConversation(contact.Peer!.Id);
+        contact.Messages.Clear();
+        contact.HasOlderMessages = false;
+        if (contact.UnreadCount != 0)
+        {
+            contact.UnreadCount = 0;
+            UnreadChanged?.Invoke();
+        }
+        RemoveIfForgotten(contact);
+    }
+
+    /// <summary>
+    /// Убирает собеседника из списка вместе с историей. Только для тех, кто не в сети:
+    /// тот, кто в сети, тут же появился бы снова.
+    /// </summary>
+    public bool RemoveContact(Contact contact)
+    {
+        if (contact.IsEveryone || contact.IsOnline) return false;
+
+        var peerId = contact.Peer!.Id;
+        _store.DeleteContact(peerId);
+        contact.Messages.Clear();
+        _contactsByPeer.Remove(peerId);
+        Contacts.Remove(contact);
+        _discovery.Forget(peerId);
+        if (contact.UnreadCount != 0)
+            UnreadChanged?.Invoke();
+        return true;
+    }
+
+    private void Save(Contact contact, ChatMessage message)
+    {
+        // Сообщение могли удалить (очистка переписки), пока шла отправка, — не воскрешаем его.
+        if (contact.Messages.Contains(message))
+            _store.SaveMessage(contact.Peer!.Id, message);
+    }
+
+    // ---- Отправка ----
 
     /// <summary>
     /// Отправляет текст контакту. Для «Все» — каждому, кто в сети, отдельным личным сообщением.
@@ -97,6 +187,7 @@ public sealed class ChatService : IDisposable
         if (contact == null) return false;
 
         contact.Messages.Remove(message);
+        _store.DeleteMessage(message.Id);
         RemoveIfForgotten(contact);
         return true;
     }
@@ -110,6 +201,7 @@ public sealed class ChatService : IDisposable
         foreach (var message in contact.Messages.Where(m => !m.IsOutgoing && !m.IsRead))
         {
             message.IsRead = true;
+            Save(contact, message);
             changed = true;
         }
         if (contact.UnreadCount != 0)
@@ -135,10 +227,10 @@ public sealed class ChatService : IDisposable
             PeerOffline = !contact.IsOnline,
         };
         contact.Messages.Add(message);
+        _store.SaveContact(contact.Peer!);
+        Save(contact, message);
         _ = FlushAsync(contact);
     }
-
-    // ---- Отправка очереди ----
 
     private void FlushAll()
     {
@@ -181,6 +273,7 @@ public sealed class ChatService : IDisposable
                 // Отметка «прочитано» могла прийти раньше, чем мы обработали подтверждение.
                 if (message.Status == MessageStatus.Sending)
                     message.Status = MessageStatus.Delivered;
+                Save(contact, message);
             }
 
             var readMessages = contact.Messages
@@ -198,7 +291,13 @@ public sealed class ChatService : IDisposable
                     MessageIds = readMessages.Select(m => m.Id).ToList(),
                 });
                 if (sent)
-                    readMessages.ForEach(m => m.ReadReceiptSent = true);
+                {
+                    foreach (var message in readMessages)
+                    {
+                        message.ReadReceiptSent = true;
+                        Save(contact, message);
+                    }
+                }
             }
         }
         finally
@@ -226,6 +325,7 @@ public sealed class ChatService : IDisposable
                 var ids = packet.MessageIds.ToHashSet();
                 foreach (var message in contact.Messages.Where(m => m.IsOutgoing && ids.Contains(m.Id)))
                     message.Status = MessageStatus.Read;
+                _store.MarkOutgoingRead(contact.Peer!.Id, ids);
                 break;
         }
     }
@@ -233,7 +333,7 @@ public sealed class ChatService : IDisposable
     private void ReceiveMessage(Contact contact, ChatPacket packet)
     {
         // Повтор, если до отправителя не дошло наше подтверждение.
-        if (!_receivedMessageIds.Add(packet.Id)) return;
+        if (_store.HasMessage(packet.Id)) return;
 
         var message = new ChatMessage
         {
@@ -244,6 +344,8 @@ public sealed class ChatService : IDisposable
             IsBroadcast = packet.IsBroadcast,
         };
         contact.Messages.Add(message);
+        _store.SaveContact(contact.Peer!);
+        Save(contact, message);
 
         if (IsConversationVisible(contact))
             MarkRead(contact);
@@ -263,6 +365,9 @@ public sealed class ChatService : IDisposable
         var contact = GetOrAddContact(peer);
         foreach (var message in contact.Messages.Where(m => m.CanCancel))
             message.PeerOffline = false;
+        // Обновляем имя и адрес у тех, с кем уже есть переписка.
+        if (contact.Messages.Count > 0)
+            _store.SaveContact(peer);
         PresenceChanged?.Invoke();
         _ = FlushAsync(contact);
     }
@@ -298,6 +403,8 @@ public sealed class ChatService : IDisposable
         if (contact.IsOnline || contact.Messages.Count > 0) return;
         _contactsByPeer.Remove(contact.Peer!.Id);
         Contacts.Remove(contact);
+        _store.DeleteContact(contact.Peer.Id);
+        _discovery.Forget(contact.Peer.Id);
     }
 
     public void Dispose()
@@ -305,5 +412,6 @@ public sealed class ChatService : IDisposable
         _retryTimer.Stop();
         _discovery.Dispose();
         _messaging.Dispose();
+        _store.Dispose();
     }
 }

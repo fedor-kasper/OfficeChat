@@ -127,6 +127,22 @@ public sealed class DiscoveryService : IDisposable
         return true;
     }
 
+    /// <summary>Добавляет собеседника из истории; он считается не в сети, пока не объявится.</summary>
+    public Peer AddKnown(Guid id, string name, string machine, IPAddress lastAddress)
+    {
+        if (_peers.TryGetValue(id, out var existing)) return existing;
+        var peer = new Peer { Id = id, Name = name, Machine = machine, Address = lastAddress };
+        _peers.Add(id, peer);
+        return peer;
+    }
+
+    /// <summary>Забывает компьютер, который не в сети (ручное удаление из списка).</summary>
+    public void Forget(Guid id)
+    {
+        if (_peers.TryGetValue(id, out var peer) && !peer.IsOnline)
+            _peers.Remove(id);
+    }
+
     /// <summary>Компьютер по идентификатору (в том числе ушедший из сети), если он уже встречался.</summary>
     public Peer? Find(Guid id) => _peers.GetValueOrDefault(id);
 

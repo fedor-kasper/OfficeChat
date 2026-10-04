@@ -8,6 +8,7 @@ namespace OfficeChat.Models;
 public sealed class Contact : INotifyPropertyChanged
 {
     private int _unreadCount;
+    private bool _hasOlderMessages;
 
     /// <summary>Компьютер собеседника; null — рассылка всем.</summary>
     public Peer? Peer { get; }
@@ -20,6 +21,9 @@ public sealed class Contact : INotifyPropertyChanged
     public string Title => Peer?.Name ?? "Все";
 
     public bool IsOnline => Peer?.IsOnline ?? true;
+
+    /// <summary>Вручную убрать из списка можно только того, кто не в сети.</summary>
+    public bool CanRemove => Peer is { IsOnline: false };
 
     public string Subtitle => Peer == null
         ? "Отправить каждому, кто в сети"
@@ -39,6 +43,18 @@ public sealed class Contact : INotifyPropertyChanged
 
     public bool HasUnread => UnreadCount > 0;
 
+    /// <summary>В истории есть сообщения раньше загруженных в окно.</summary>
+    public bool HasOlderMessages
+    {
+        get => _hasOlderMessages;
+        set
+        {
+            if (_hasOlderMessages == value) return;
+            _hasOlderMessages = value;
+            OnPropertyChanged();
+        }
+    }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private Contact(Peer? peer)
@@ -50,6 +66,7 @@ public sealed class Contact : INotifyPropertyChanged
                 OnPropertyChanged(nameof(Title));
                 OnPropertyChanged(nameof(Subtitle));
                 OnPropertyChanged(nameof(IsOnline));
+                OnPropertyChanged(nameof(CanRemove));
             };
     }
 
