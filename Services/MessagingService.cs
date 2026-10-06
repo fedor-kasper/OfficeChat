@@ -150,6 +150,16 @@ public sealed class ChatPacket
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
+    // Крестики-нолики: все пакеты относятся к партии <see cref="GameId"/>.
+    public const string GameInvite = "game-invite";
+    public const string GameAccept = "game-accept";
+    public const string GameDecline = "game-decline";
+    /// <summary>Пригласивший передумал до ответа.</summary>
+    public const string GameCancel = "game-cancel";
+    /// <summary>Ход: клетка <see cref="Cell"/>, номер хода <see cref="MoveNumber"/>.</summary>
+    public const string GameMove = "game-move";
+    public const string GameResign = "game-resign";
+
     public string App { get; set; } = AppTag;
     public string Type { get; set; } = Message;
     public Guid Id { get; set; }
@@ -163,4 +173,8 @@ public sealed class ChatPacket
     public bool IsBroadcast { get; set; }
 
     public List<Guid>? MessageIds { get; set; }
+
+    public Guid GameId { get; set; }
+    public int Cell { get; set; }
+    public int MoveNumber { get; set; }
 }

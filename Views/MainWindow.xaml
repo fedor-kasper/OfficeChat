@@ -38,6 +38,13 @@
                 <DataTrigger Binding="{Binding CanCancel}" Value="True">
                     <Setter TargetName="Bubble" Property="Background" Value="#FFF1D6" />
                 </DataTrigger>
+                <!-- Итог мини-игры: по центру, отдельным цветом -->
+                <DataTrigger Binding="{Binding IsGame}" Value="True">
+                    <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Center" />
+                    <Setter TargetName="Bubble" Property="Background" Value="#F3E8FF" />
+                    <Setter TargetName="Bubble" Property="BorderBrush" Value="#D8B4FE" />
+                    <Setter TargetName="Bubble" Property="BorderThickness" Value="1" />
+                </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
     </Window.Resources>
@@ -121,6 +128,9 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="{Binding Peer, Converter={StaticResource NotNullToVisibility}}">
+                        <Button Content="🎮 Крестики-нолики" Padding="8,2" Margin="0,0,6,0"
+                                ToolTip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
+                                Visibility="{Binding IsOnline, Converter={StaticResource BoolToVisibility}}" />
                         <Button Content="Очистить переписку" Padding="8,2" Click="ClearConversation_Click" />
                         <Button Content="Удалить из списка" Padding="8,2" Margin="6,0,0,0"
                                 Click="RemoveContact_Click"

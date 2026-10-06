@@ -12,6 +12,13 @@ public enum MessageStatus
     Read,
 }
 
+public enum MessageKind
+{
+    Text = 0,
+    /// <summary>Итог мини-игры — служебная запись в истории, по сети не передаётся.</summary>
+    Game = 1,
+}
+
 /// <summary>Одно сообщение в личной переписке (входящее или исходящее).</summary>
 public sealed class ChatMessage : INotifyPropertyChanged
 {
@@ -23,6 +30,10 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public required bool IsOutgoing { get; init; }
     public required string Text { get; init; }
     public required DateTime Timestamp { get; init; }
+
+    public MessageKind Kind { get; init; }
+
+    public bool IsGame => Kind == MessageKind.Game;
 
     /// <summary>Сообщение было отправлено «Всем», а не лично.</summary>
     public bool IsBroadcast { get; init; }

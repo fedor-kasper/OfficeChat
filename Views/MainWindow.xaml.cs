@@ -14,6 +14,8 @@ public partial class MainWindow : Window
     private readonly ChatService _chat;
     private readonly NotificationManager _notifications;
     private readonly TrayIcon _tray;
+    private readonly GameService _games;
+    private readonly Dictionary<Guid, GameWindow> _gameWindows = new();
     private Contact? _current;
     private bool _exiting;
     private bool _trayHintShown;
@@ -35,6 +37,9 @@ public partial class MainWindow : Window
         ContactsList.ItemsSource = _chat.Contacts;
 
         _notifications = new NotificationManager(_chat, OpenConversation);
+
+        _games = new GameService(_chat);
+        _games.InviteReceived += game => _notifications.ShowGameInvite(game, AcceptGame, _games.Decline);
 
         _tray = new TrayIcon();
         _tray.OpenRequested += ShowFromTray;
@@ -63,6 +68,35 @@ public partial class MainWindow : Window
         // Если эта переписка уже открыта перед глазами — всплывать незачем.
         if (!_chat.IsConversationVisible(contact))
             _notifications.Show(contact, message);
+    }
+
+    // ---- Крестики-нолики ----
+
+    private void InviteToGame_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current is not { IsEveryone: false, IsOnline: true }) return;
+        OpenGameWindow(_games.Invite(_current));
+    }
+
+    private void AcceptGame(TicTacToeGame game)
+    {
+        _games.Accept(game);
+        OpenGameWindow(game);
+    }
+
+    /// <summary>Отдельное окно партии; если оно уже открыто — просто выводим его вперёд.</summary>
+    private void OpenGameWindow(TicTacToeGame game)
+    {
+        if (!_gameWindows.TryGetValue(game.Id, out var window))
+        {
+            window = new GameWindow(_games, game);
+            window.Closed += (_, _) => _gameWindows.Remove(game.Id);
+            _gameWindows.Add(game.Id, window);
+            window.Show();
+        }
+        if (window.WindowState == WindowState.Minimized)
+            window.WindowState = WindowState.Normal;
+        window.Activate();
     }
 
     // ---- Трей и всплывающие окна ----
@@ -332,6 +366,9 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        foreach (var window in _gameWindows.Values.ToList())
+            window.ForceClose();
+        _games.Dispose();
         _notifications.CloseAll();
         _chat.Dispose();
         _tray.Dispose();

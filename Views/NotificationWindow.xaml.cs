@@ -12,7 +12,7 @@ namespace OfficeChat.Views;
 /// и висит, пока его не закроют. Новые сообщения от того же человека добавляются в это же окно,
 /// ответы из окна показываются в нём же со статусом доставки.
 /// </summary>
-public partial class NotificationWindow : Window
+public partial class NotificationWindow : Window, IStackedPopup
 {
     private static readonly Duration FadeDuration = new(TimeSpan.FromMilliseconds(200));
 

@@ -38,6 +38,9 @@ public sealed class ChatService : IDisposable
     /// <summary>Кто-то появился в сети или ушёл.</summary>
     public event Action? PresenceChanged;
 
+    /// <summary>Пришёл пакет мини-игры (обрабатывает <see cref="GameService"/>).</summary>
+    public event Action<Contact, ChatPacket>? GamePacketReceived;
+
     /// <summary>
     /// Открыта ли сейчас переписка на экране (тогда входящие сразу считаются прочитанными).
     /// Задаёт окно.
@@ -150,6 +153,42 @@ public sealed class ChatService : IDisposable
         if (contact.UnreadCount != 0)
             UnreadChanged?.Invoke();
         return true;
+    }
+
+    // ---- Для мини-игр ----
+
+    /// <summary>Отправляет служебный пакет собеседнику. false — не в сети или не дошло.</summary>
+    public async Task<bool> SendPacketAsync(Contact contact, ChatPacket packet)
+    {
+        var peer = contact.Peer;
+        if (peer is not { IsOnline: true }) return false;
+
+        packet.From = _settings.UserId;
+        packet.FromName = _settings.DisplayName;
+        packet.FromMachine = Environment.MachineName;
+        return await _messaging.SendAsync(peer.Address, packet);
+    }
+
+    /// <summary>Добавляет в историю переписки запись об игре (видна только у себя).</summary>
+    public void AddGameRecord(Contact contact, string text)
+    {
+        if (contact.IsEveryone) return;
+
+        var message = new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            IsOutgoing = false,
+            Text = text,
+            Timestamp = DateTime.Now,
+            Kind = MessageKind.Game,
+            Status = MessageStatus.Delivered,
+            // Служебная запись не считается непрочитанной и не требует отметки «прочитано».
+            IsRead = true,
+            ReadReceiptSent = true,
+        };
+        contact.Messages.Add(message);
+        _store.SaveContact(contact.Peer!);
+        Save(contact, message);
     }
 
     private void Save(Contact contact, ChatMessage message)
@@ -330,6 +369,9 @@ public sealed class ChatService : IDisposable
         {
             case ChatPacket.Message:
                 ReceiveMessage(contact, packet);
+                break;
+            case not null when packet.Type.StartsWith("game-", StringComparison.Ordinal):
+                GamePacketReceived?.Invoke(contact, packet);
                 break;
             case ChatPacket.ReadReceipt when packet.MessageIds != null:
                 var ids = packet.MessageIds.ToHashSet();

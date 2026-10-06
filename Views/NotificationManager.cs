@@ -18,7 +18,7 @@ public sealed class NotificationManager
     private readonly Action<Contact> _openConversation;
 
     // [0] — нижнее (самое старое) окно.
-    private readonly List<NotificationWindow> _windows = new();
+    private readonly List<Window> _windows = new();
 
     public NotificationManager(ChatService chat, Action<Contact> openConversation)
     {
@@ -29,7 +29,7 @@ public sealed class NotificationManager
     public void Show(Contact contact, ChatMessage message)
     {
         // Этот человек уже висит на экране — дописываем в его окно.
-        var existing = _windows.FirstOrDefault(w => w.Contact == contact && !w.IsClosing);
+        var existing = _windows.OfType<NotificationWindow>().FirstOrDefault(w => w.Contact == contact && !w.IsClosing);
         if (existing != null)
         {
             existing.AddMessage(message);
@@ -43,6 +43,20 @@ public sealed class NotificationManager
             _openConversation(w.Contact);
         };
         window.ReplyRequested += (w, text) => w.AddMessage(_chat.Reply(w.Contact, text));
+        AddToStack(window);
+    }
+
+    /// <summary>Приглашение в крестики-нолики с кнопками «Принять / Отклонить».</summary>
+    public void ShowGameInvite(TicTacToeGame game, Action<TicTacToeGame> accept, Action<TicTacToeGame> decline)
+    {
+        var window = new GameInviteWindow(game);
+        window.Accepted += w => accept(w.Game);
+        window.Declined += w => decline(w.Game);
+        AddToStack(window);
+    }
+
+    private void AddToStack<T>(T window) where T : Window, IStackedPopup
+    {
         window.SizeChanged += (_, _) => Layout();
         window.Closed += (_, _) =>
         {
@@ -52,7 +66,9 @@ public sealed class NotificationManager
 
         _windows.Add(window);
 
-        foreach (var old in _windows.Where(w => !w.IsClosing).SkipLast(MaxVisible).ToList())
+        // Приглашения не вытесняем — на них нужно ответить.
+        foreach (var old in Popups.OfType<NotificationWindow>().Where(w => !w.IsClosing)
+                     .SkipLast(MaxVisible).ToList())
             old.FadeOutAndClose();
 
         var area = SystemParameters.WorkArea;
@@ -62,10 +78,12 @@ public sealed class NotificationManager
         Layout();
     }
 
+    private IEnumerable<IStackedPopup> Popups => _windows.Cast<IStackedPopup>();
+
     /// <summary>Закрывает окна о переписке, которую открыли в главном окне.</summary>
     public void CloseFor(Contact contact)
     {
-        foreach (var window in _windows.Where(w => w.Contact == contact).ToList())
+        foreach (var window in Popups.OfType<NotificationWindow>().Where(w => w.Contact == contact).ToList())
             window.FadeOutAndClose();
     }
 

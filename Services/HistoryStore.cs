@@ -44,6 +44,13 @@ public sealed class HistoryStore : IDisposable
             );
             CREATE INDEX IF NOT EXISTS ix_messages_peer_time ON messages (peer_id, timestamp);
             """);
+
+        // Колонка kind появилась вместе с мини-игрой — добавляем в базы, созданные раньше.
+        using (var info = Command("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'kind'"))
+        {
+            if (info.ExecuteScalar() == null)
+                Execute("ALTER TABLE messages ADD COLUMN kind INTEGER NOT NULL DEFAULT 0");
+        }
     }
 
     // ---- Контакты ----
@@ -131,8 +138,8 @@ public sealed class HistoryStore : IDisposable
     public void SaveMessage(Guid peerId, ChatMessage message)
     {
         using var cmd = Command("""
-            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent)
-            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt)
+            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind)
+            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt
             """);
         cmd.Parameters.AddWithValue("$id", message.Id.ToString());
@@ -144,6 +151,7 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$status", (int)message.Status);
         cmd.Parameters.AddWithValue("$isRead", message.IsRead);
         cmd.Parameters.AddWithValue("$receipt", message.ReadReceiptSent);
+        cmd.Parameters.AddWithValue("$kind", (int)message.Kind);
         cmd.ExecuteNonQuery();
     }
 
@@ -181,7 +189,7 @@ public sealed class HistoryStore : IDisposable
     // ---- Служебное ----
 
     private const string MessageColumns =
-        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent";
+        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind";
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -201,6 +209,7 @@ public sealed class HistoryStore : IDisposable
                 Status = status == MessageStatus.Sending ? MessageStatus.Queued : status,
                 IsRead = reader.GetBoolean(6),
                 ReadReceiptSent = reader.GetBoolean(7),
+                Kind = (MessageKind)reader.GetInt32(8),
             });
         }
         return result;
