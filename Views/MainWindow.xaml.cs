@@ -15,7 +15,6 @@ public partial class MainWindow : Window
     private readonly NotificationManager _notifications;
     private readonly TrayIcon _tray;
     private readonly GameService _games;
-    private readonly Dictionary<Guid, GameWindow> _gameWindows = new();
     private Contact? _current;
     private bool _exiting;
     private bool _trayHintShown;
@@ -39,7 +38,14 @@ public partial class MainWindow : Window
         _notifications = new NotificationManager(_chat, OpenConversation);
 
         _games = new GameService(_chat);
-        _games.InviteReceived += game => _notifications.ShowGameInvite(game, AcceptGame, _games.Decline);
+        _games.InviteReceived += OnGameInvite;
+        _games.OpponentMoved += OnOpponentMoved;
+        _games.GameChanged += contact =>
+        {
+            if (_current?.Peer != null && contact.Peer?.Id == _current.Peer.Id)
+                GameView.Show(_games.GameFor(_current));
+        };
+        GameView.Attach(_games);
 
         _tray = new TrayIcon();
         _tray.OpenRequested += ShowFromTray;
@@ -75,28 +81,36 @@ public partial class MainWindow : Window
     private void InviteToGame_Click(object sender, RoutedEventArgs e)
     {
         if (_current is not { IsEveryone: false, IsOnline: true }) return;
-        OpenGameWindow(_games.Invite(_current));
+        _games.Invite(_current);
+        GameView.Show(_games.GameFor(_current));
     }
 
+    private void OnGameInvite(TicTacToeGame game)
+    {
+        // Переписка с пригласившим открыта на экране — кнопки «Принять / Отклонить» уже видны в панели.
+        if (_chat.IsConversationVisible(game.Opponent)) return;
+        _notifications.ShowGameInvite(game, AcceptGame, _games.Decline);
+    }
+
+    /// <summary>Приняли во всплывающем окне — открываем переписку, где идёт игра.</summary>
     private void AcceptGame(TicTacToeGame game)
     {
         _games.Accept(game);
-        OpenGameWindow(game);
+        OpenConversation(game.Opponent);
     }
 
-    /// <summary>Отдельное окно партии; если оно уже открыто — просто выводим его вперёд.</summary>
-    private void OpenGameWindow(TicTacToeGame game)
+    /// <summary>Соперник сходил, а переписка не на экране — напоминаем, что наш ход.</summary>
+    private void OnOpponentMoved(TicTacToeGame game)
     {
-        if (!_gameWindows.TryGetValue(game.Id, out var window))
+        if (_chat.IsConversationVisible(game.Opponent)) return;
+        _notifications.Show(game.Opponent, new ChatMessage
         {
-            window = new GameWindow(_games, game);
-            window.Closed += (_, _) => _gameWindows.Remove(game.Id);
-            _gameWindows.Add(game.Id, window);
-            window.Show();
-        }
-        if (window.WindowState == WindowState.Minimized)
-            window.WindowState = WindowState.Normal;
-        window.Activate();
+            Id = Guid.NewGuid(),
+            IsOutgoing = false,
+            Text = "🎮 Ваш ход в крестики-нолики",
+            Timestamp = DateTime.Now,
+            Kind = MessageKind.Game,
+        });
     }
 
     // ---- Трей и всплывающие окна ----
@@ -159,6 +173,7 @@ public partial class MainWindow : Window
         MessagesScroll.ScrollToEnd();
         _chat.MarkRead(_current);
         _notifications.CloseFor(_current);
+        GameView.Show(_games.GameFor(_current));
         InputBox.Focus();
     }
 
@@ -366,8 +381,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        foreach (var window in _gameWindows.Values.ToList())
-            window.ForceClose();
+        _games.LeaveAll();
         _games.Dispose();
         _notifications.CloseAll();
         _chat.Dispose();

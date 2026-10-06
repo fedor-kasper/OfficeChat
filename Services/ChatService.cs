@@ -22,6 +22,8 @@ public sealed class ChatService : IDisposable
     private readonly MessagingService _messaging;
     private readonly Dictionary<Guid, Contact> _contactsByPeer = new();
     private readonly HashSet<Guid> _flushing = new();
+    // Собеседники, которых нельзя убирать из списка (например, с ними идёт игра).
+    private readonly HashSet<Guid> _pinnedPeers = new();
     private readonly DispatcherTimer _retryTimer;
 
     /// <summary>«Все» первым, затем компьютеры по алфавиту.</summary>
@@ -157,16 +159,41 @@ public sealed class ChatService : IDisposable
 
     // ---- Для мини-игр ----
 
-    /// <summary>Отправляет служебный пакет собеседнику. false — не в сети или не дошло.</summary>
+    /// <summary>
+    /// Отправляет служебный пакет собеседнику. false — не дошло.
+    /// Пробуем по последнему известному адресу, даже если обнаружение считает собеседника
+    /// ушедшим: UDP-рассылку может блокировать брандмауэр, а прямое TCP-соединение — работать.
+    /// </summary>
     public async Task<bool> SendPacketAsync(Contact contact, ChatPacket packet)
     {
         var peer = contact.Peer;
-        if (peer is not { IsOnline: true }) return false;
+        if (peer == null || peer.Address.Equals(IPAddress.None)) return false;
 
         packet.From = _settings.UserId;
         packet.FromName = _settings.DisplayName;
         packet.FromMachine = Environment.MachineName;
-        return await _messaging.SendAsync(peer.Address, packet);
+        var delivered = await _messaging.SendAsync(peer.Address, packet);
+        if (delivered) MarkReachable(peer);
+        return delivered;
+    }
+
+    /// <summary>Собеседник принял наш пакет — значит, он точно в сети.</summary>
+    private void MarkReachable(Peer peer) =>
+        _discovery.Observe(peer.Id, peer.Name, peer.Machine, peer.Address);
+
+    /// <summary>Актуальный контакт собеседника по его идентификатору.</summary>
+    public Contact? FindContact(Guid peerId) => _contactsByPeer.GetValueOrDefault(peerId);
+
+    /// <summary>Не убирать собеседника из списка, даже если он ушёл из сети без переписки.</summary>
+    public void PinContact(Contact contact)
+    {
+        if (contact.Peer != null) _pinnedPeers.Add(contact.Peer.Id);
+    }
+
+    public void UnpinContact(Contact contact)
+    {
+        if (contact.Peer == null || !_pinnedPeers.Remove(contact.Peer.Id)) return;
+        RemoveIfForgotten(contact);
     }
 
     /// <summary>Добавляет в историю переписки запись об игре (видна только у себя).</summary>
@@ -294,7 +321,12 @@ public sealed class ChatService : IDisposable
     private async Task FlushAsync(Contact contact)
     {
         var peer = contact.Peer!;
-        if (!peer.IsOnline || !_flushing.Add(peer.Id)) return;
+        var hasWork = contact.Messages.Any(m =>
+            (m.IsOutgoing && m.Status == MessageStatus.Queued) ||
+            (!m.IsOutgoing && m.IsRead && !m.ReadReceiptSent));
+        if (!hasWork || peer.Address.Equals(IPAddress.None) || !_flushing.Add(peer.Id)) return;
+        // Даже если обнаружение считает собеседника ушедшим, пробуем напрямую по последнему адресу:
+        // UDP-рассылку может резать брандмауэр, а TCP при этом работать.
         try
         {
             while (contact.Messages.FirstOrDefault(m => m.IsOutgoing && m.Status == MessageStatus.Queued)
@@ -319,6 +351,7 @@ public sealed class ChatService : IDisposable
                     message.Status = MessageStatus.Queued;
                     return;
                 }
+                MarkReachable(peer);
                 // Отметка «прочитано» могла прийти раньше, чем мы обработали подтверждение.
                 if (message.Status == MessageStatus.Sending)
                     message.Status = MessageStatus.Delivered;
@@ -452,7 +485,7 @@ public sealed class ChatService : IDisposable
     /// <summary>Ушедший из сети компьютер без переписки убираем из списка, с перепиской — оставляем серым.</summary>
     private void RemoveIfForgotten(Contact contact)
     {
-        if (contact.IsOnline || contact.Messages.Count > 0) return;
+        if (contact.IsOnline || contact.Messages.Count > 0 || _pinnedPeers.Contains(contact.Peer!.Id)) return;
         _contactsByPeer.Remove(contact.Peer!.Id);
         Contacts.Remove(contact);
         _store.DeleteContact(contact.Peer.Id);
