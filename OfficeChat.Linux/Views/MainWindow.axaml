@@ -135,7 +135,15 @@
                                     <Panel Width="84" Height="84" ToolTip.Tip="{Binding FileName}">
                                         <Border CornerRadius="8" Background="#F3F5F8" BorderBrush="{StaticResource LineBrush}"
                                                 BorderThickness="1" ClipToBounds="True">
-                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
+                                            <Panel>
+                                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" IsVisible="{Binding IsImage}" />
+                                                <!-- Файл: значок и имя -->
+                                                <StackPanel Margin="4,6,4,16" IsVisible="{Binding IsFile}">
+                                                    <TextBlock Text="{Binding Icon}" FontSize="24" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="{Binding FileName}" FontSize="10" TextAlignment="Center"
+                                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="28" />
+                                                </StackPanel>
+                                            </Panel>
                                         </Border>
                                         <Border VerticalAlignment="Bottom" Background="#99000000" CornerRadius="0,0,8,8">
                                             <TextBlock Text="{Binding SizeText}" Foreground="White" FontSize="10"
@@ -154,7 +162,7 @@
 
                     <Button DockPanel.Dock="Left" Content="📎" Width="40" Margin="0,0,6,0" FontSize="16"
                             VerticalAlignment="Stretch" HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
-                            ToolTip.Tip="Прикрепить изображение (также можно перетащить файл в окно или вставить Ctrl+V)"
+                            ToolTip.Tip="Прикрепить файл или изображение (также можно перетащить файлы в окно или вставить Ctrl+V)"
                             Click="Attach_Click" />
                     <Button DockPanel.Dock="Right" Content="Отправить" Margin="8,0,0,0" Padding="14,0"
                             VerticalAlignment="Stretch" VerticalContentAlignment="Center" Classes="flat" Click="Send_Click" />
@@ -168,8 +176,9 @@
             <local:GamePanel x:Name="GameView" DockPanel.Dock="Right" IsVisible="False" />
 
             <Panel>
-                <ScrollViewer x:Name="MessagesScroll" Padding="14,8">
-                    <StackPanel>
+                <!-- Отступы — у содержимого, а не у ScrollViewer: иначе «прокрутить до конца» не доходит до низа -->
+                <ScrollViewer x:Name="MessagesScroll">
+                    <StackPanel Margin="14,8">
                         <Button Content="Показать более ранние сообщения" HorizontalAlignment="Center"
                                 Margin="0,4,0,8" Padding="10,3" FontSize="12" Click="LoadOlder_Click"
                                 IsVisible="{Binding HasOlderMessages}" />
@@ -199,6 +208,28 @@
                                                 </Border.ContextMenu>
                                             </Border>
 
+                                            <!-- Файл: значок по типу, имя, размер и действия -->
+                                            <Border IsVisible="{Binding IsFile}" Margin="0,0,0,4" Padding="10,8"
+                                                    CornerRadius="8" Background="#0F000000" MinWidth="250">
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Left" Text="{Binding FileIcon}" FontSize="30"
+                                                               VerticalAlignment="Center" Margin="0,0,10,0" />
+                                                    <StackPanel Spacing="2">
+                                                        <TextBlock Text="{Binding FileName}" FontSize="14" FontWeight="SemiBold"
+                                                                   MaxWidth="320" TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding FileName}" />
+                                                        <TextBlock Text="{Binding FileSizeText}" FontSize="11"
+                                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Spacing="6">
+                                                            <Button Content="Открыть" Padding="10,2" FontSize="12" Click="FileOpen_Click" />
+                                                            <Button Content="Сохранить как…" Padding="10,2" FontSize="12" Click="FileSave_Click" />
+                                                            <Button Content="Показать в папке" Padding="10,2" FontSize="12"
+                                                                    Click="FileShowInFolder_Click" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+
                                             <SelectableTextBlock Classes="message" Text="{Binding Text}" IsVisible="{Binding HasText}" />
                                             <DockPanel Margin="0,3,0,0">
                                                 <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="10,0,0,0"
@@ -225,8 +256,8 @@
                 <Border x:Name="DropOverlay" Margin="12" CornerRadius="12" Background="#E6EFF6FF"
                         BorderBrush="#2563EB" BorderThickness="2" IsHitTestVisible="False" IsVisible="False">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="6">
-                        <TextBlock Text="🖼" FontSize="40" HorizontalAlignment="Center" />
-                        <TextBlock Text="Отпустите, чтобы прикрепить изображение" FontSize="16" FontWeight="SemiBold"
+                        <TextBlock Text="📎" FontSize="40" HorizontalAlignment="Center" />
+                        <TextBlock Text="Отпустите, чтобы прикрепить файлы" FontSize="16" FontWeight="SemiBold"
                                    Foreground="#1E3A8A" />
                     </StackPanel>
                 </Border>

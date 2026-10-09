@@ -23,7 +23,7 @@ public partial class MainWindow : Window
     private readonly Tray _tray;
     private Contact? _current;
     // Изображения, выбранные для отправки (полоса над полем ввода).
-    private readonly ObservableCollection<PendingImage> _attachments = new();
+    private readonly ObservableCollection<PendingAttachment> _attachments = new();
     private bool _exiting;
 
     public MainWindow() : this(new AppSettings { DisplayName = "Дизайнер" }) { }
@@ -204,8 +204,15 @@ public partial class MainWindow : Window
             ScrollToEnd();
     }
 
-    private void ScrollToEnd() =>
+    /// <summary>
+    /// Прокрутка к последнему сообщению. Повторяем чуть позже: высота нового блока (картинка, файл)
+    /// досчитывается после первого прохода разметки, и одной прокрутки не хватает до самого низа.
+    /// </summary>
+    private void ScrollToEnd()
+    {
         Dispatcher.UIThread.Post(() => MessagesScroll.ScrollToEnd(), DispatcherPriority.Background);
+        DispatcherTimer.RunOnce(() => MessagesScroll.ScrollToEnd(), TimeSpan.FromMilliseconds(150));
+    }
 
     private void UpdateChatHeader()
     {
@@ -255,28 +262,49 @@ public partial class MainWindow : Window
 
     private void Send_Click(object? sender, RoutedEventArgs e) => SendCurrent();
 
-    private void SendCurrent()
+    private async void SendCurrent()
     {
         var text = InputBox.Text?.Trim() ?? "";
-        if (_current == null || (text.Length == 0 && _attachments.Count == 0)) return;
+        var contact = _current;
+        if (contact == null || (text.Length == 0 && _attachments.Count == 0)) return;
 
         int recipients;
         if (_attachments.Count > 0)
         {
-            // Одно изображение — текст становится подписью (как в Telegram); несколько — текст отдельным сообщением.
-            var images = _attachments.ToList();
-            var caption = images.Count == 1 ? text : "";
-            recipients = 0;
-            foreach (var image in images)
-                recipients = _chat.SendImage(_current, image.Data, image.FileName, caption);
-            if (images.Count > 1 && text.Length > 0)
-                _chat.Send(_current, text);
+            // Одно вложение — текст становится подписью (как в Telegram); несколько — текст отдельным сообщением.
+            var items = _attachments.ToList();
+            var caption = items.Count == 1 ? text : "";
             _attachments.Clear();
+            InputBox.Text = "";
+            recipients = 0;
+            foreach (var item in items)
+            {
+                if (item.IsImage)
+                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption);
+                else
+                {
+                    // Большой файл сначала копируется в хранилище программы — это может занять время.
+                    if (item.Size > 50 * 1024 * 1024) ShowNotice($"Подготовка «{item.FileName}» к отправке…");
+                    try
+                    {
+                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Log.Error($"Не удалось подготовить файл {item.SourcePath} к отправке", ex);
+                        ShowNotice($"Не удалось отправить «{item.FileName}»: {ex.Message}");
+                        return;
+                    }
+                }
+            }
+            if (items.Count > 1 && text.Length > 0)
+                _chat.Send(contact, text);
         }
         else
         {
-            recipients = _chat.Send(_current, text);
+            recipients = _chat.Send(contact, text);
         }
+        if (contact != _current) return;
 
         if (_current.IsEveryone)
         {
@@ -321,47 +349,51 @@ public partial class MainWindow : Window
         return mod10 switch { 1 => one, >= 2 and <= 4 => few, _ => many };
     }
 
-    // ---- Изображения: прикрепление ----
+    // ---- Вложения: прикрепление ----
 
     private async void Attach_Click(object? sender, RoutedEventArgs e)
     {
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = "Выберите изображения",
+            Title = "Выберите файлы или изображения",
             AllowMultiple = true,
             FileTypeFilter = new[]
             {
+                FilePickerFileTypes.All,
                 new FilePickerFileType("Изображения")
                 {
                     Patterns = ImageStore.Extensions.SelectMany(x => new[] { "*" + x, "*" + x.ToUpperInvariant() }).ToArray(),
                     MimeTypes = new[] { "image/*" },
                 },
-                FilePickerFileTypes.All,
             },
         });
         if (files.Count == 0) return;
 
         var errors = new List<string>();
-        AddAttachments(PendingImage.FromStorageItems(files, errors), errors);
+        AddAttachments(PendingAttachment.FromStorageItems(files, errors), errors);
     }
 
-    private void AddAttachments(List<PendingImage> images, List<string> errors)
+    private void AddAttachments(List<PendingAttachment> images, List<string> errors)
     {
         foreach (var image in images)
+        {
+            // Тот же файл дважды не прикрепляем (например, Ctrl+V нажали повторно).
+            if (image.SourcePath != null && _attachments.Any(a => a.SourcePath == image.SourcePath)) continue;
             _attachments.Add(image);
+        }
 
         if (errors.Count > 0)
             ShowNotice("Не прикреплено: " + string.Join("; ", errors));
         else if (images.Count > 0)
             ShowNotice(_attachments.Count == 1
-                ? "Изображение прикреплено. Напишите подпись (необязательно) и нажмите «Отправить»."
-                : $"Прикреплено изображений: {_attachments.Count}. Нажмите «Отправить».");
+                ? $"{(_attachments[0].IsImage ? "Изображение" : "Файл")} прикреплён(о). Напишите подпись (необязательно) и нажмите «Отправить»."
+                : $"Прикреплено: {_attachments.Count}. Нажмите «Отправить».");
         InputBox.Focus();
     }
 
     private void RemoveAttachment_Click(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is PendingImage image)
+        if ((sender as Control)?.DataContext is PendingAttachment image)
             _attachments.Remove(image);
         if (_attachments.Count == 0) NoticeText.IsVisible = false;
     }
@@ -372,7 +404,7 @@ public partial class MainWindow : Window
         try
         {
             var errors = new List<string>();
-            var images = await PendingImage.FromClipboardAsync(Clipboard, errors);
+            var images = await PendingAttachment.FromClipboardAsync(Clipboard, errors);
             if (images == null)
             {
                 InputBox.Paste(); // в буфере текст — вставляем как обычно
@@ -391,7 +423,7 @@ public partial class MainWindow : Window
 
     private void ChatPanel_DragOver(object? sender, DragEventArgs e)
     {
-        if (_current == null || !PendingImage.HasImageFiles(e.DataTransfer))
+        if (_current == null || !PendingAttachment.HasFiles(e.DataTransfer))
         {
             e.DragEffects = DragDropEffects.None;
             return;
@@ -408,7 +440,7 @@ public partial class MainWindow : Window
         if (_current == null || e.DataTransfer.TryGetFiles() is not { } files) return;
 
         var errors = new List<string>();
-        AddAttachments(PendingImage.FromStorageItems(files, errors), errors);
+        AddAttachments(PendingAttachment.FromStorageItems(files, errors), errors);
         Activate();
     }
 
@@ -442,6 +474,23 @@ public partial class MainWindow : Window
     private void ImageOpenExternal_Click(object? sender, RoutedEventArgs e)
     {
         if (MessageOf(sender) is { } message) Shell.Open(message.ImagePath);
+    }
+
+    // ---- Файлы в ленте ----
+
+    private async void FileOpen_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) await FileActions.OpenAsync(message, this);
+    }
+
+    private async void FileSave_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) await FileActions.SaveAsAsync(message, this);
+    }
+
+    private async void FileShowInFolder_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) await FileActions.ShowInFolderAsync(message, this);
     }
 
     private void OpenImage(ChatMessage message)
