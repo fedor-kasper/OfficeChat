@@ -35,9 +35,10 @@ public static class SettingsService
                 if (settings != null) return settings;
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Повреждённый файл — начинаем с чистых настроек.
+            Log.Warn($"Не удалось прочитать {SettingsPath} — начинаем с чистых настроек", ex);
         }
         return new AppSettings();
     }

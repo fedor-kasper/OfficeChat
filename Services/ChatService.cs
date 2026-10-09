@@ -75,6 +75,8 @@ public sealed class ChatService : IDisposable
     public void Start()
     {
         _messaging.Start();
+        // Порт сообщений может оказаться нестандартным (второй пользователь Windows) — сообщаем его остальным.
+        _discovery.MessagingPort = _messaging.Port;
         _discovery.Start();
         _retryTimer.Start();
     }
@@ -172,7 +174,8 @@ public sealed class ChatService : IDisposable
         packet.From = _settings.UserId;
         packet.FromName = _settings.DisplayName;
         packet.FromMachine = Environment.MachineName;
-        var delivered = await _messaging.SendAsync(peer.Address, packet);
+        packet.FromPort = _messaging.Port;
+        var delivered = await _messaging.SendAsync(peer.Address, peer.Port, packet);
         if (delivered) MarkReachable(peer);
         return delivered;
     }
@@ -333,13 +336,14 @@ public sealed class ChatService : IDisposable
                    is { } message)
             {
                 message.Status = MessageStatus.Sending;
-                var delivered = await _messaging.SendAsync(peer.Address, new ChatPacket
+                var delivered = await _messaging.SendAsync(peer.Address, peer.Port, new ChatPacket
                 {
                     Type = ChatPacket.Message,
                     Id = message.Id,
                     From = _settings.UserId,
                     FromName = _settings.DisplayName,
                     FromMachine = Environment.MachineName,
+                    FromPort = _messaging.Port,
                     Text = message.Text,
                     SentAt = new DateTimeOffset(message.Timestamp),
                     IsBroadcast = message.IsBroadcast,
@@ -363,13 +367,14 @@ public sealed class ChatService : IDisposable
                 .ToList();
             if (readMessages.Count > 0)
             {
-                var sent = await _messaging.SendAsync(peer.Address, new ChatPacket
+                var sent = await _messaging.SendAsync(peer.Address, peer.Port, new ChatPacket
                 {
                     Type = ChatPacket.ReadReceipt,
                     Id = Guid.NewGuid(),
                     From = _settings.UserId,
                     FromName = _settings.DisplayName,
                     FromMachine = Environment.MachineName,
+                    FromPort = _messaging.Port,
                     MessageIds = readMessages.Select(m => m.Id).ToList(),
                 });
                 if (sent)
@@ -395,7 +400,7 @@ public sealed class ChatService : IDisposable
         if (packet.From == _settings.UserId) return;
 
         // Раз прислал пакет — значит, точно в сети, даже если обнаружение до нас ещё не дошло.
-        _discovery.Observe(packet.From, packet.FromName, packet.FromMachine, from);
+        _discovery.Observe(packet.From, packet.FromName, packet.FromMachine, from, packet.FromPort);
         var contact = GetOrAddContact(_discovery.Find(packet.From)!);
 
         switch (packet.Type)

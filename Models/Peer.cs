@@ -11,6 +11,10 @@ public sealed class Peer : INotifyPropertyChanged
     private string _machine = "";
     private IPAddress _address = IPAddress.None;
     private bool _isOnline;
+    private int _port = DefaultMessagingPort;
+
+    /// <summary>Порт сообщений по умолчанию (совпадает с MessagingService.MessagingPort).</summary>
+    public const int DefaultMessagingPort = 45679;
 
     public required Guid Id { get; init; }
 
@@ -30,6 +34,16 @@ public sealed class Peer : INotifyPropertyChanged
     {
         get => _address;
         set => Set(ref _address, value);
+    }
+
+    /// <summary>
+    /// TCP-порт сообщений собеседника. Обычно стандартный, но если на одном компьютере
+    /// работают несколько пользователей Windows, у второго и следующих порт свой.
+    /// </summary>
+    public int Port
+    {
+        get => _port;
+        set => Set(ref _port, value);
     }
 
     public bool IsOnline

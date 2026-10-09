@@ -29,6 +29,9 @@ public sealed class DiscoveryService : IDisposable
     /// <summary>Компьютер ушёл из сети или закрыл программу (вызывается в UI-потоке).</summary>
     public event Action<Peer>? PeerOffline;
 
+    /// <summary>Наш TCP-порт сообщений — сообщаем его остальным в каждом пакете обнаружения.</summary>
+    public int MessagingPort { get; set; } = Peer.DefaultMessagingPort;
+
     public DiscoveryService(AppSettings settings)
     {
         _settings = settings;
@@ -37,13 +40,41 @@ public sealed class DiscoveryService : IDisposable
 
     public void Start()
     {
-        _udp = new UdpClient(AddressFamily.InterNetwork);
-        _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-        _udp.Client.Bind(new IPEndPoint(IPAddress.Any, DiscoveryPort));
-        _udp.EnableBroadcast = true;
+        try
+        {
+            _udp = CreateSocket(DiscoveryPort);
+        }
+        catch (SocketException ex)
+        {
+            // Порт занят копией OfficeChat другого пользователя Windows на этом компьютере.
+            // Рассылки остальных до нас тогда не дойдут, но наши «я здесь» уходят как обычно,
+            // а остальные отвечают на них прямо на наш порт — так мы их и видим.
+            Log.Warn($"UDP-порт {DiscoveryPort} занят ({ex.SocketErrorCode}) — берём свободный, " +
+                     "других будем узнавать по ответам на наши рассылки");
+            _udp = CreateSocket(0);
+        }
+        Log.Info($"Обнаружение: слушаем UDP-порт {((IPEndPoint)_udp.Client.LocalEndPoint!).Port}, " +
+                 $"сообщаем порт сообщений {MessagingPort}");
 
         _ = ReceiveLoopAsync(_cts.Token);
         _ = AnnounceLoopAsync(_cts.Token);
+    }
+
+    private static UdpClient CreateSocket(int port)
+    {
+        var udp = new UdpClient(AddressFamily.InterNetwork);
+        try
+        {
+            udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
+            udp.EnableBroadcast = true;
+            return udp;
+        }
+        catch
+        {
+            udp.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Сразу разослать актуальные данные о себе (например, после смены имени).</summary>
@@ -83,13 +114,15 @@ public sealed class DiscoveryService : IDisposable
             if (packet == null || packet.App != DiscoveryPacket.AppTag || packet.Id == _settings.UserId)
                 continue;
 
-            _uiContext.Post(_ => HandlePacket(packet, result.RemoteEndPoint.Address), null);
+            var sender = result.RemoteEndPoint;
+            _uiContext.Post(_ => HandlePacket(packet, sender), null);
         }
     }
 
     // Выполняется в UI-потоке, поэтому _peers не требует блокировок.
-    private void HandlePacket(DiscoveryPacket packet, IPAddress from)
+    private void HandlePacket(DiscoveryPacket packet, IPEndPoint sender)
     {
+        var from = sender.Address;
         if (packet.Type == DiscoveryPacket.Bye)
         {
             if (_peers.TryGetValue(packet.Id, out var gone))
@@ -97,18 +130,22 @@ public sealed class DiscoveryService : IDisposable
             return;
         }
 
-        var cameOnline = Observe(packet.Id, packet.Name, packet.Machine, from);
+        var cameOnline = Observe(packet.Id, packet.Name, packet.Machine, from, packet.Port);
 
-        // Новичку отвечаем напрямую, чтобы он увидел нас сразу, не дожидаясь нашей рассылки.
-        if (cameOnline && packet.Type == DiscoveryPacket.Hello)
-            Send(CreatePacket(DiscoveryPacket.Reply), new IPEndPoint(from, DiscoveryPort));
+        // Отвечаем напрямую на адрес и порт отправителя:
+        // - новичку — чтобы он увидел нас сразу, не дожидаясь нашей рассылки;
+        // - тому, кто сидит не на стандартном порту (второй пользователь Windows на компьютере), — всегда,
+        //   иначе он не услышит ничьих рассылок и через 10 секунд решит, что все ушли.
+        if (packet.Type == DiscoveryPacket.Hello && (cameOnline || sender.Port != DiscoveryPort))
+            Send(CreatePacket(DiscoveryPacket.Reply), sender);
     }
 
     /// <summary>
     /// Отмечает, что компьютер точно в сети (пришёл пакет обнаружения или сообщение).
     /// Возвращает true, если он только что появился. Вызывать только из UI-потока.
     /// </summary>
-    public bool Observe(Guid id, string name, string machine, IPAddress from)
+    /// <param name="messagingPort">Порт сообщений из пакета: null — не менять, 0 — старая версия (стандартный порт).</param>
+    public bool Observe(Guid id, string name, string machine, IPAddress from, int? messagingPort = null)
     {
         if (!_peers.TryGetValue(id, out var peer))
         {
@@ -119,10 +156,14 @@ public sealed class DiscoveryService : IDisposable
         if (!string.IsNullOrWhiteSpace(name)) peer.Name = name;
         if (!string.IsNullOrWhiteSpace(machine)) peer.Machine = machine;
         peer.Address = from;
+        // 0 — старая версия программы, она всегда на стандартном порту.
+        if (messagingPort is { } port)
+            peer.Port = port > 0 ? port : Peer.DefaultMessagingPort;
         peer.LastSeen = DateTime.UtcNow;
 
         if (peer.IsOnline) return false;
         peer.IsOnline = true;
+        Log.Info($"В сети: «{peer.Name}» ({peer.Machine}, {from}:{peer.Port})");
         PeerOnline?.Invoke(peer);
         return true;
     }
@@ -150,6 +191,7 @@ public sealed class DiscoveryService : IDisposable
     {
         if (!peer.IsOnline) return;
         peer.IsOnline = false;
+        Log.Info($"Не в сети: «{peer.Name}» ({peer.Machine})");
         PeerOffline?.Invoke(peer);
     }
 
@@ -169,6 +211,7 @@ public sealed class DiscoveryService : IDisposable
         Id = _settings.UserId,
         Name = _settings.DisplayName,
         Machine = Environment.MachineName,
+        Port = MessagingPort,
     };
 
     private void Broadcast(DiscoveryPacket packet)
@@ -242,4 +285,7 @@ public sealed class DiscoveryPacket
     public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public string Machine { get; set; } = "";
+
+    /// <summary>TCP-порт сообщений отправителя (0 у старых версий — стандартный).</summary>
+    public int Port { get; set; }
 }

@@ -14,7 +14,13 @@ namespace OfficeChat.Services;
 /// </summary>
 public sealed class MessagingService : IDisposable
 {
-    public const int MessagingPort = 45679;
+    public const int MessagingPort = Models.Peer.DefaultMessagingPort;
+
+    /// <summary>Порт, на котором реально слушаем (стандартный или свободный, если стандартный занят).</summary>
+    public int Port { get; private set; }
+
+    // Чтобы недоступный собеседник не засыпал лог: об ошибке отправки на адрес пишем не чаще раза в минуту.
+    private readonly Dictionary<string, DateTime> _lastFailureLog = new();
 
     private const int MaxFrameSize = 1024 * 1024;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
@@ -34,13 +40,26 @@ public sealed class MessagingService : IDisposable
 
     public void Start()
     {
-        _listener = new TcpListener(IPAddress.Any, MessagingPort);
-        _listener.Start();
+        try
+        {
+            _listener = new TcpListener(IPAddress.Any, MessagingPort);
+            _listener.Start();
+        }
+        catch (SocketException ex)
+        {
+            // Порт занят — обычно копией OfficeChat другого пользователя Windows на этом же компьютере.
+            // Берём любой свободный; остальные узнают его из пакетов обнаружения.
+            Log.Warn($"TCP-порт {MessagingPort} занят ({ex.SocketErrorCode}) — берём свободный");
+            _listener = new TcpListener(IPAddress.Any, 0);
+            _listener.Start();
+        }
+        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
+        Log.Info($"Сообщения: слушаем TCP-порт {Port}");
         _ = AcceptLoopAsync(_cts.Token);
     }
 
     /// <summary>Отправляет пакет и ждёт подтверждения. Возвращает true, если получатель его принял.</summary>
-    public async Task<bool> SendAsync(IPAddress address, ChatPacket packet)
+    public async Task<bool> SendAsync(IPAddress address, int port, ChatPacket packet)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         timeout.CancelAfter(ExchangeTimeout);
@@ -50,19 +69,34 @@ public sealed class MessagingService : IDisposable
             using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token))
             {
                 connectTimeout.CancelAfter(ConnectTimeout);
-                await client.ConnectAsync(address, MessagingPort, connectTimeout.Token);
+                await client.ConnectAsync(address, port, connectTimeout.Token);
             }
 
             var stream = client.GetStream();
             await WriteFrameAsync(stream, packet, timeout.Token);
             var ack = await ReadFrameAsync(stream, timeout.Token);
-            return ack is { Type: ChatPacket.Ack } && ack.Id == packet.Id;
+            var delivered = ack is { Type: ChatPacket.Ack } && ack.Id == packet.Id;
+            if (!delivered) LogFailure(address, port, packet, "нет подтверждения");
+            return delivered;
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException
                                        or JsonException or ObjectDisposedException)
         {
+            LogFailure(address, port, packet, ex is SocketException se ? se.SocketErrorCode.ToString() : ex.GetType().Name);
             return false;
         }
+    }
+
+    private void LogFailure(IPAddress address, int port, ChatPacket packet, string reason)
+    {
+        var key = $"{address}:{port}";
+        lock (_lastFailureLog)
+        {
+            if (_lastFailureLog.TryGetValue(key, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(1))
+                return;
+            _lastFailureLog[key] = DateTime.UtcNow;
+        }
+        Log.Info($"Не удалось отправить «{packet.Type}» на {key}: {reason} (повторим позже)");
     }
 
     private async Task AcceptLoopAsync(CancellationToken ct)
@@ -97,6 +131,8 @@ public sealed class MessagingService : IDisposable
                 .ConfigureAwait(false);
 
             var from = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.MapToIPv4();
+            if (packet.Type != ChatPacket.Ack)
+                Log.Info($"Получен «{packet.Type}» от «{packet.FromName}» ({from}:{packet.FromPort})");
             _uiContext.Post(_ => PacketReceived?.Invoke(packet, from), null);
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException
@@ -167,6 +203,9 @@ public sealed class ChatPacket
     public Guid From { get; set; }
     public string FromName { get; set; } = "";
     public string FromMachine { get; set; } = "";
+
+    /// <summary>Порт сообщений отправителя — куда отвечать. 0 у старых версий: значит стандартный.</summary>
+    public int FromPort { get; set; }
 
     public string Text { get; set; } = "";
     public DateTimeOffset SentAt { get; set; }
