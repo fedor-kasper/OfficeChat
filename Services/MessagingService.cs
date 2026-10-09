@@ -23,8 +23,11 @@ public sealed class MessagingService : IDisposable
     private readonly Dictionary<string, DateTime> _lastFailureLog = new();
 
     private const int MaxFrameSize = 1024 * 1024;
+    // Двоичное вложение (изображение) идёт сразу после JSON-заголовка отдельным блоком.
+    private const long MaxPayloadSize = ImageStore.MaxBytes;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
-    private static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(10);
+    // С запасом на передачу изображения до 20 МБ по медленной сети.
+    private static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(60);
 
     private readonly SynchronizationContext _uiContext;
     private readonly CancellationTokenSource _cts = new();
@@ -149,6 +152,8 @@ public sealed class MessagingService : IDisposable
         BinaryPrimitives.WriteInt32LittleEndian(header, body.Length);
         await stream.WriteAsync(header, ct).ConfigureAwait(false);
         await stream.WriteAsync(body, ct).ConfigureAwait(false);
+        if (packet.Payload is { Length: > 0 } payload)
+            await stream.WriteAsync(payload, ct).ConfigureAwait(false);
     }
 
     private static async Task<ChatPacket?> ReadFrameAsync(NetworkStream stream, CancellationToken ct)
@@ -161,7 +166,16 @@ public sealed class MessagingService : IDisposable
 
         var body = new byte[length];
         await stream.ReadExactlyAsync(body, ct).ConfigureAwait(false);
-        return JsonSerializer.Deserialize<ChatPacket>(body);
+        var packet = JsonSerializer.Deserialize<ChatPacket>(body);
+
+        if (packet is { PayloadLength: > 0 })
+        {
+            if (packet.PayloadLength > MaxPayloadSize)
+                throw new IOException("Слишком большое вложение.");
+            packet.Payload = new byte[packet.PayloadLength];
+            await stream.ReadExactlyAsync(packet.Payload, ct).ConfigureAwait(false);
+        }
+        return packet;
     }
 
     public void Dispose()
@@ -196,6 +210,9 @@ public sealed class ChatPacket
     public const string GameMove = "game-move";
     public const string GameResign = "game-resign";
 
+    /// <summary>Изображение: файл <see cref="FileName"/>, байты — в <see cref="Payload"/>, подпись — в <see cref="Text"/>.</summary>
+    public const string Image = "image";
+
     public string App { get; set; } = AppTag;
     public string Type { get; set; } = Message;
     public Guid Id { get; set; }
@@ -212,6 +229,24 @@ public sealed class ChatPacket
     public bool IsBroadcast { get; set; }
 
     public List<Guid>? MessageIds { get; set; }
+
+    public string FileName { get; set; } = "";
+
+    /// <summary>Размер двоичного вложения, которое идёт следом за JSON.</summary>
+    public long PayloadLength { get; set; }
+
+    /// <summary>Само вложение — в JSON не попадает, передаётся отдельным блоком.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public byte[]? Payload
+    {
+        get => _payload;
+        set
+        {
+            _payload = value;
+            PayloadLength = value?.Length ?? 0;
+        }
+    }
+    private byte[]? _payload;
 
     public Guid GameId { get; set; }
     public int Cell { get; set; }

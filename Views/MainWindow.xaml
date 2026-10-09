@@ -8,6 +8,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
         <local:NotNullToVisibilityConverter x:Key="NotNullToVisibility" />
+        <local:ImageThumbnailConverter x:Key="Thumbnail" DecodeWidth="640" />
 
         <!-- Пузырёк сообщения: входящие слева серые, исходящие справа синие, ждущие в очереди — жёлтые -->
         <DataTemplate x:Key="MessageTemplate">
@@ -17,8 +18,28 @@
                     <TextBlock Text="сообщение всем" FontSize="10" Margin="0,0,0,2"
                                Foreground="{StaticResource MutedTextBrush}"
                                Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- Изображение: превью в ленте, клик — просмотр, правый клик — сохранить/копировать -->
+                    <Border Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}"
+                            Margin="-6,-2,-6,4" CornerRadius="8" Background="#11000000" Cursor="Hand"
+                            HorizontalAlignment="Left" ToolTip="{Binding FileName}"
+                            MouseLeftButtonUp="Image_Click">
+                        <Grid>
+                            <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
+                                   MaxWidth="320" MaxHeight="320" Stretch="Uniform" StretchDirection="DownOnly"
+                                   RenderOptions.BitmapScalingMode="HighQuality" />
+                        </Grid>
+                        <Border.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="Открыть" FontWeight="SemiBold" Click="ImageOpen_Click" />
+                                <MenuItem Header="Сохранить как…" Click="ImageSave_Click" />
+                                <MenuItem Header="Копировать" Click="ImageCopy_Click" />
+                                <MenuItem Header="Открыть в программе просмотра" Click="ImageOpenExternal_Click" />
+                            </ContextMenu>
+                        </Border.ContextMenu>
+                    </Border>
                     <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                             FontSize="14" BorderThickness="0" Background="Transparent" Padding="0" />
+                             FontSize="14" BorderThickness="0" Background="Transparent" Padding="0"
+                             Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
                     <DockPanel Margin="0,3,0,0">
                         <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="10,0,0,0"
                                    Foreground="{StaticResource MutedTextBrush}" />
@@ -123,7 +144,9 @@
         </StackPanel>
 
         <!-- Правая часть: переписка -->
-        <DockPanel x:Name="ChatPanel" Grid.Column="1" Visibility="Collapsed">
+        <DockPanel x:Name="ChatPanel" Grid.Column="1" Visibility="Collapsed" AllowDrop="True"
+                   PreviewDragEnter="ChatPanel_PreviewDragOver" PreviewDragOver="ChatPanel_PreviewDragOver"
+                   PreviewDragLeave="ChatPanel_PreviewDragLeave" PreviewDrop="ChatPanel_PreviewDrop">
             <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
@@ -150,6 +173,41 @@
                     <TextBlock x:Name="NoticeText" DockPanel.Dock="Top" Margin="2,0,0,6" FontSize="11"
                                TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
                                Visibility="Collapsed" />
+
+                    <!-- Изображения, выбранные для отправки: уйдут по «Отправить», текст станет подписью -->
+                    <ScrollViewer x:Name="AttachmentsBar" DockPanel.Dock="Top" Margin="0,0,0,8"
+                                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                                  Visibility="Collapsed">
+                        <ItemsControl x:Name="AttachmentsList">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Width="84" Height="84" Margin="0,0,8,0" ToolTip="{Binding FileName}">
+                                        <Border CornerRadius="8" Background="#F3F5F8" BorderBrush="#E2E5EA"
+                                                BorderThickness="1">
+                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Margin="2" />
+                                        </Border>
+                                        <Border VerticalAlignment="Bottom" Background="#99000000" CornerRadius="0,0,8,8">
+                                            <TextBlock Text="{Binding SizeText}" Foreground="White" FontSize="10"
+                                                       HorizontalAlignment="Center" Margin="0,1" />
+                                        </Border>
+                                        <Button Content="✕" Width="20" Height="20" FontSize="10" Padding="0"
+                                                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,3,3,0"
+                                                Style="{StaticResource FlatButton}" Background="#CC111827"
+                                                ToolTip="Убрать" Click="RemoveAttachment_Click" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+
+                    <Button DockPanel.Dock="Left" Content="📎" Width="36" Margin="0,0,6,0" FontSize="16"
+                            ToolTip="Прикрепить изображение (также можно перетащить файл в окно или вставить Ctrl+V)"
+                            Click="Attach_Click" />
                     <Button DockPanel.Dock="Right" Content="Отправить" Margin="8,0,0,0" Padding="14,0"
                             VerticalAlignment="Stretch" Click="Send_Click" />
                     <TextBox x:Name="InputBox" FontSize="14" Padding="6,5" MinHeight="34" MaxHeight="120"
@@ -174,6 +232,16 @@
                 <TextBlock x:Name="MessagesHintText" HorizontalAlignment="Center" VerticalAlignment="Center"
                            MaxWidth="340" TextAlignment="Center" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedTextBrush}" />
+
+                <!-- Подсказка при перетаскивании файлов в окно -->
+                <Border x:Name="DropOverlay" Margin="12" CornerRadius="12" Background="#E6EFF6FF"
+                        BorderBrush="#2563EB" BorderThickness="2" IsHitTestVisible="False" Visibility="Collapsed">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <TextBlock Text="🖼" FontSize="40" HorizontalAlignment="Center" />
+                        <TextBlock Text="Отпустите, чтобы прикрепить изображение" FontSize="16" FontWeight="SemiBold"
+                                   Foreground="#1E3A8A" Margin="0,6,0,0" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </DockPanel>
     </Grid>

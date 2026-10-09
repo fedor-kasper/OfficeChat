@@ -1,6 +1,7 @@
 <Window x:Class="OfficeChat.Views.NotificationWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:OfficeChat.Views"
         Title="OfficeChat — новое сообщение"
         Width="440" SizeToContent="Height"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
@@ -8,6 +9,7 @@
         Opacity="0">
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <local:ImageThumbnailConverter x:Key="Thumbnail" DecodeWidth="480" />
 
         <!-- Строка в ленте окна: входящие — слева, ваши ответы — справа со статусом -->
         <DataTemplate x:Key="PopupMessageTemplate">
@@ -16,7 +18,13 @@
                 <StackPanel>
                     <TextBlock Text="сообщение всем" FontSize="10" Foreground="{StaticResource MutedTextBrush}"
                                Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
-                    <TextBlock Text="{Binding Text}" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
+                    <!-- Изображение — превью прямо в уведомлении -->
+                    <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
+                           MaxWidth="300" MaxHeight="180" Stretch="Uniform" StretchDirection="DownOnly"
+                           HorizontalAlignment="Left" Margin="0,2,0,4"
+                           RenderOptions.BitmapScalingMode="HighQuality"
+                           Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Text="{Binding PreviewText}" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
                     <DockPanel Margin="0,2,0,0">
                         <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="8,0,0,0"
                                    Foreground="{StaticResource MutedTextBrush}" />

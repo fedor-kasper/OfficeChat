@@ -17,6 +17,8 @@ public enum MessageKind
     Text = 0,
     /// <summary>Итог мини-игры — служебная запись в истории, по сети не передаётся.</summary>
     Game = 1,
+    /// <summary>Изображение; <see cref="ChatMessage.Text"/> — подпись (может быть пустой).</summary>
+    Image = 2,
 }
 
 /// <summary>Одно сообщение в личной переписке (входящее или исходящее).</summary>
@@ -34,6 +36,21 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public MessageKind Kind { get; init; }
 
     public bool IsGame => Kind == MessageKind.Game;
+
+    public bool IsImage => Kind == MessageKind.Image;
+
+    /// <summary>Исходное имя файла изображения (для «Сохранить как…»).</summary>
+    public string FileName { get; init; } = "";
+
+    /// <summary>Где на диске лежит изображение этого сообщения.</summary>
+    public string ImagePath { get; init; } = "";
+
+    public bool HasText => !string.IsNullOrEmpty(Text);
+
+    /// <summary>Короткий текст для уведомлений: у изображения — значок и подпись.</summary>
+    public string PreviewText => IsImage
+        ? (HasText ? $"🖼 {Text}" : "🖼 Изображение")
+        : Text;
 
     /// <summary>Сообщение было отправлено «Всем», а не лично.</summary>
     public bool IsBroadcast { get; init; }

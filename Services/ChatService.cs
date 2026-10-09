@@ -1,3 +1,4 @@
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Windows.Threading;
@@ -257,6 +258,45 @@ public sealed class ChatService : IDisposable
         return message;
     }
 
+    /// <summary>
+    /// Отправляет изображение (с необязательной подписью). Для «Все» — каждому, кто в сети,
+    /// отдельной копией. Возвращает число получателей.
+    /// </summary>
+    public int SendImage(Contact contact, byte[] data, string fileName, string caption)
+    {
+        var recipients = contact.IsEveryone
+            ? _contactsByPeer.Values.Where(c => c.IsOnline).ToList()
+            : new List<Contact> { contact };
+        foreach (var recipient in recipients)
+            EnqueueImage(recipient, data, fileName, caption, contact.IsEveryone);
+        Log.Info($"Изображение «{fileName}» ({data.Length / 1024} КБ) поставлено в очередь для {recipients.Count} получателей");
+        return recipients.Count;
+    }
+
+    private void EnqueueImage(Contact contact, byte[] data, string fileName, string caption, bool isBroadcast)
+    {
+        var id = Guid.NewGuid();
+        // У каждой копии свой файл: удаление одной переписки не трогает другие.
+        var path = ImageStore.Save(id, fileName, data);
+        var message = new ChatMessage
+        {
+            Id = id,
+            IsOutgoing = true,
+            Kind = MessageKind.Image,
+            Text = caption,
+            FileName = fileName,
+            ImagePath = path,
+            Timestamp = DateTime.Now,
+            IsBroadcast = isBroadcast,
+            Status = MessageStatus.Queued,
+            PeerOffline = !contact.IsOnline,
+        };
+        contact.Messages.Add(message);
+        _store.SaveContact(contact.Peer!);
+        Save(contact, message);
+        _ = FlushAsync(contact);
+    }
+
     /// <summary>Отменяет отправку сообщения, которое ещё ждёт в очереди.</summary>
     public bool Cancel(ChatMessage message)
     {
@@ -266,6 +306,7 @@ public sealed class ChatService : IDisposable
 
         contact.Messages.Remove(message);
         _store.DeleteMessage(message.Id);
+        if (message.IsImage) ImageStore.Delete(message.ImagePath);
         RemoveIfForgotten(contact);
         return true;
     }
@@ -335,10 +376,9 @@ public sealed class ChatService : IDisposable
             while (contact.Messages.FirstOrDefault(m => m.IsOutgoing && m.Status == MessageStatus.Queued)
                    is { } message)
             {
-                message.Status = MessageStatus.Sending;
-                var delivered = await _messaging.SendAsync(peer.Address, peer.Port, new ChatPacket
+                var packet = new ChatPacket
                 {
-                    Type = ChatPacket.Message,
+                    Type = message.IsImage ? ChatPacket.Image : ChatPacket.Message,
                     Id = message.Id,
                     From = _settings.UserId,
                     FromName = _settings.DisplayName,
@@ -347,7 +387,26 @@ public sealed class ChatService : IDisposable
                     Text = message.Text,
                     SentAt = new DateTimeOffset(message.Timestamp),
                     IsBroadcast = message.IsBroadcast,
-                });
+                    FileName = message.FileName,
+                };
+                if (message.IsImage)
+                {
+                    // Байты читаем с диска при каждой попытке — очередь переживает перезапуск программы.
+                    try
+                    {
+                        packet.Payload = await File.ReadAllBytesAsync(message.ImagePath);
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                        Log.Error($"Файл изображения {message.ImagePath} недоступен — убираем сообщение из очереди", ex);
+                        contact.Messages.Remove(message);
+                        _store.DeleteMessage(message.Id);
+                        continue;
+                    }
+                }
+
+                message.Status = MessageStatus.Sending;
+                var delivered = await _messaging.SendAsync(peer.Address, peer.Port, packet);
 
                 if (!delivered)
                 {
@@ -406,6 +465,7 @@ public sealed class ChatService : IDisposable
         switch (packet.Type)
         {
             case ChatPacket.Message:
+            case ChatPacket.Image:
                 ReceiveMessage(contact, packet);
                 break;
             case not null when packet.Type.StartsWith("game-", StringComparison.Ordinal):
@@ -425,11 +485,30 @@ public sealed class ChatService : IDisposable
         // Повтор, если до отправителя не дошло наше подтверждение.
         if (_store.HasMessage(packet.Id)) return;
 
+        var isImage = packet.Type == ChatPacket.Image;
+        var imagePath = "";
+        if (isImage)
+        {
+            if (packet.Payload is not { Length: > 0 }) return;
+            try
+            {
+                imagePath = ImageStore.Save(packet.Id, packet.FileName, packet.Payload);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Error($"Не удалось сохранить изображение от «{contact.Title}»", ex);
+                return;
+            }
+        }
+
         var message = new ChatMessage
         {
             Id = packet.Id,
             IsOutgoing = false,
+            Kind = isImage ? MessageKind.Image : MessageKind.Text,
             Text = packet.Text,
+            FileName = packet.FileName,
+            ImagePath = imagePath,
             Timestamp = packet.SentAt.LocalDateTime,
             IsBroadcast = packet.IsBroadcast,
         };

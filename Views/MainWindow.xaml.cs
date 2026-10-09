@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
@@ -16,6 +17,8 @@ public partial class MainWindow : Window
     private readonly TrayIcon _tray;
     private readonly GameService _games;
     private Contact? _current;
+    // Изображения, выбранные для отправки (полоса над полем ввода).
+    private readonly ObservableCollection<PendingImage> _attachments = new();
     private bool _exiting;
     private bool _trayHintShown;
 
@@ -51,6 +54,13 @@ public partial class MainWindow : Window
         _tray.OpenRequested += ShowFromTray;
         _tray.ExitRequested += ExitApplication;
         _chat.UnreadChanged += () => _tray.SetUnread(_chat.TotalUnread);
+
+        AttachmentsList.ItemsSource = _attachments;
+        _attachments.CollectionChanged += (_, _) =>
+            AttachmentsBar.Visibility = _attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        // Ctrl+V, Shift+Insert и «Вставить» из меню: если в буфере изображение — прикрепляем его.
+        CommandManager.AddPreviewCanExecuteHandler(InputBox, InputBox_PreviewCanPaste);
+        CommandManager.AddPreviewExecutedHandler(InputBox, InputBox_PreviewPaste);
 
         _chat.Start();
 
@@ -152,6 +162,8 @@ public partial class MainWindow : Window
 
         _current = ContactsList.SelectedItem as Contact;
         NoticeText.Visibility = Visibility.Collapsed;
+        // Прикреплённое к одной переписке не должно случайно уйти в другую.
+        _attachments.Clear();
 
         if (_current == null)
         {
@@ -233,9 +245,26 @@ public partial class MainWindow : Window
     private void SendCurrent()
     {
         var text = InputBox.Text.Trim();
-        if (_current == null || text.Length == 0) return;
+        if (_current == null || (text.Length == 0 && _attachments.Count == 0)) return;
 
-        var recipients = _chat.Send(_current, text);
+        int recipients;
+        if (_attachments.Count > 0)
+        {
+            // Одно изображение — текст становится подписью к нему (как в Telegram).
+            // Несколько — уходят по очереди, а текст следом отдельным сообщением.
+            var images = _attachments.ToList();
+            var caption = images.Count == 1 ? text : "";
+            recipients = 0;
+            foreach (var image in images)
+                recipients = _chat.SendImage(_current, image.Data, image.FileName, caption);
+            if (images.Count > 1 && text.Length > 0)
+                _chat.Send(_current, text);
+            _attachments.Clear();
+        }
+        else
+        {
+            recipients = _chat.Send(_current, text);
+        }
 
         if (_current.IsEveryone)
         {
@@ -258,6 +287,154 @@ public partial class MainWindow : Window
 
         InputBox.Clear();
         InputBox.Focus();
+    }
+
+    // ---- Изображения: прикрепление ----
+
+    private void Attach_Click(object sender, RoutedEventArgs e)
+    {
+        var patterns = string.Join(";", ImageStore.Extensions.Select(x => "*" + x));
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Выберите изображения",
+            Filter = $"Изображения ({patterns})|{patterns}|Все файлы (*.*)|*.*",
+            Multiselect = true,
+        };
+        if (dialog.ShowDialog(this) != true) return;
+
+        var errors = new List<string>();
+        var images = new List<PendingImage>();
+        foreach (var file in dialog.FileNames)
+        {
+            if (PendingImage.FromFile(file, out var error) is { } image) images.Add(image);
+            else if (error != null) errors.Add(error);
+        }
+        AddAttachments(images, errors);
+    }
+
+    private void AddAttachments(List<PendingImage> images, List<string> errors)
+    {
+        foreach (var image in images)
+            _attachments.Add(image);
+
+        if (errors.Count > 0)
+            ShowNotice("Не прикреплено: " + string.Join("; ", errors));
+        else if (images.Count > 0)
+            ShowNotice(_attachments.Count == 1
+                ? "Изображение прикреплено. Напишите подпись (необязательно) и нажмите «Отправить»."
+                : $"Прикреплено изображений: {_attachments.Count}. Нажмите «Отправить».");
+        InputBox.Focus();
+    }
+
+    private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is PendingImage image)
+            _attachments.Remove(image);
+        if (_attachments.Count == 0) NoticeText.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Вставлять ли из буфера как изображение. Если там есть текст (Word, Excel кладут ещё и картинку),
+    /// вставляем текст как обычно; файлы-изображения и скриншоты — прикрепляем.
+    /// </summary>
+    private static bool ClipboardHasImageToAttach()
+    {
+        try
+        {
+            var data = Clipboard.GetDataObject();
+            if (data == null || !PendingImage.ContainsImage(data)) return false;
+            return data.GetDataPresent(DataFormats.FileDrop) || !data.GetDataPresent(DataFormats.UnicodeText);
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return false;
+        }
+    }
+
+    private void InputBox_PreviewCanPaste(object sender, CanExecuteRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Paste || !ClipboardHasImageToAttach()) return;
+        e.CanExecute = true;
+        e.Handled = true;
+    }
+
+    private void InputBox_PreviewPaste(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (e.Command != ApplicationCommands.Paste || !ClipboardHasImageToAttach()) return;
+        e.Handled = true;
+
+        var errors = new List<string>();
+        var data = Clipboard.GetDataObject();
+        var images = data == null ? new List<PendingImage>() : PendingImage.FromDataObject(data, errors);
+        AddAttachments(images, errors);
+    }
+
+    // ---- Изображения: перетаскивание файлов в окно ----
+
+    private void ChatPanel_PreviewDragOver(object sender, DragEventArgs e)
+    {
+        if (_current == null || !PendingImage.ContainsImage(e.Data)) return;
+        e.Effects = DragDropEffects.Copy;
+        e.Handled = true;
+        DropOverlay.Visibility = Visibility.Visible;
+    }
+
+    private void ChatPanel_PreviewDragLeave(object sender, DragEventArgs e)
+    {
+        // DragLeave приходит и при переходе между дочерними элементами — прячем, только если курсор вышел из панели.
+        var position = e.GetPosition(ChatPanel);
+        if (position.X <= 0 || position.Y <= 0 || position.X >= ChatPanel.ActualWidth || position.Y >= ChatPanel.ActualHeight)
+            DropOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void ChatPanel_PreviewDrop(object sender, DragEventArgs e)
+    {
+        DropOverlay.Visibility = Visibility.Collapsed;
+        if (_current == null || !PendingImage.ContainsImage(e.Data)) return;
+        e.Handled = true;
+
+        var errors = new List<string>();
+        AddAttachments(PendingImage.FromDataObject(e.Data, errors), errors);
+        Activate();
+    }
+
+    // ---- Изображения: просмотр и сохранение ----
+
+    private static ChatMessage? MessageOf(object sender) => (sender as FrameworkElement)?.DataContext as ChatMessage;
+
+    private void Image_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) OpenImage(message);
+    }
+
+    private void ImageOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) OpenImage(message);
+    }
+
+    private void ImageSave_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) ImageViewerWindow.SaveAs(message, this);
+    }
+
+    private void ImageCopy_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message)
+        {
+            ImageViewerWindow.Copy(message);
+            ShowNotice("Изображение скопировано в буфер обмена.");
+        }
+    }
+
+    private void ImageOpenExternal_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) ImageViewerWindow.OpenExternal(message);
+    }
+
+    private void OpenImage(ChatMessage message)
+    {
+        var sender = message.IsOutgoing ? "Вы" : _current?.Title ?? "";
+        new ImageViewerWindow(message, sender) { Owner = this }.Show();
     }
 
     private void CancelMessage_Click(object sender, RoutedEventArgs e)

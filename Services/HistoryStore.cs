@@ -51,6 +51,12 @@ public sealed class HistoryStore : IDisposable
             if (info.ExecuteScalar() == null)
                 Execute("ALTER TABLE messages ADD COLUMN kind INTEGER NOT NULL DEFAULT 0");
         }
+        // Колонка file_name — с изображениями.
+        using (var info = Command("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'file_name'"))
+        {
+            if (info.ExecuteScalar() == null)
+                Execute("ALTER TABLE messages ADD COLUMN file_name TEXT NOT NULL DEFAULT ''");
+        }
     }
 
     // ---- Контакты ----
@@ -138,8 +144,8 @@ public sealed class HistoryStore : IDisposable
     public void SaveMessage(Guid peerId, ChatMessage message)
     {
         using var cmd = Command("""
-            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind)
-            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind)
+            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name)
+            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt
             """);
         cmd.Parameters.AddWithValue("$id", message.Id.ToString());
@@ -152,6 +158,7 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$isRead", message.IsRead);
         cmd.Parameters.AddWithValue("$receipt", message.ReadReceiptSent);
         cmd.Parameters.AddWithValue("$kind", (int)message.Kind);
+        cmd.Parameters.AddWithValue("$fileName", message.FileName);
         cmd.ExecuteNonQuery();
     }
 
@@ -179,17 +186,33 @@ public sealed class HistoryStore : IDisposable
         cmd.ExecuteNonQuery();
     }
 
+    /// <summary>Файлы изображений переписки — чтобы удалить их вместе с ней.</summary>
+    public List<string> ImagePaths(Guid peerId)
+    {
+        using var cmd = Command($"SELECT id, file_name FROM messages WHERE peer_id = $peer AND kind = {(int)MessageKind.Image}");
+        cmd.Parameters.AddWithValue("$peer", peerId.ToString());
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read())
+            result.Add(ImageStore.PathFor(Guid.Parse(reader.GetString(0)), reader.GetString(1)));
+        return result;
+    }
+
+    /// <summary>Удаляет переписку вместе с файлами её изображений.</summary>
     public void DeleteConversation(Guid peerId)
     {
+        var images = ImagePaths(peerId);
         using var cmd = Command("DELETE FROM messages WHERE peer_id = $peer");
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
         cmd.ExecuteNonQuery();
+        foreach (var path in images)
+            ImageStore.Delete(path);
     }
 
     // ---- Служебное ----
 
     private const string MessageColumns =
-        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind";
+        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name";
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -198,9 +221,12 @@ public sealed class HistoryStore : IDisposable
         while (reader.Read())
         {
             var status = (MessageStatus)reader.GetInt32(5);
+            var id = Guid.Parse(reader.GetString(0));
+            var kind = (MessageKind)reader.GetInt32(8);
+            var fileName = reader.GetString(9);
             result.Add(new ChatMessage
             {
-                Id = Guid.Parse(reader.GetString(0)),
+                Id = id,
                 IsOutgoing = reader.GetBoolean(1),
                 Text = reader.GetString(2),
                 Timestamp = new DateTime(reader.GetInt64(3)),
@@ -209,7 +235,9 @@ public sealed class HistoryStore : IDisposable
                 Status = status == MessageStatus.Sending ? MessageStatus.Queued : status,
                 IsRead = reader.GetBoolean(6),
                 ReadReceiptSent = reader.GetBoolean(7),
-                Kind = (MessageKind)reader.GetInt32(8),
+                Kind = kind,
+                FileName = fileName,
+                ImagePath = kind == MessageKind.Image ? ImageStore.PathFor(id, fileName) : "",
             });
         }
         return result;
