@@ -18,7 +18,7 @@ public partial class MainWindow : Window
     private readonly GameService _games;
     private Contact? _current;
     // Изображения, выбранные для отправки (полоса над полем ввода).
-    private readonly ObservableCollection<PendingImage> _attachments = new();
+    private readonly ObservableCollection<PendingAttachment> _attachments = new();
     private bool _exiting;
     private bool _trayHintShown;
 
@@ -272,29 +272,50 @@ public partial class MainWindow : Window
 
     private void Send_Click(object sender, RoutedEventArgs e) => SendCurrent();
 
-    private void SendCurrent()
+    private async void SendCurrent()
     {
         var text = InputBox.Text.Trim();
-        if (_current == null || (text.Length == 0 && _attachments.Count == 0)) return;
+        var contact = _current;
+        if (contact == null || (text.Length == 0 && _attachments.Count == 0)) return;
 
         int recipients;
         if (_attachments.Count > 0)
         {
-            // Одно изображение — текст становится подписью к нему (как в Telegram).
+            // Одно вложение — текст становится подписью к нему (как в Telegram).
             // Несколько — уходят по очереди, а текст следом отдельным сообщением.
-            var images = _attachments.ToList();
-            var caption = images.Count == 1 ? text : "";
-            recipients = 0;
-            foreach (var image in images)
-                recipients = _chat.SendImage(_current, image.Data, image.FileName, caption);
-            if (images.Count > 1 && text.Length > 0)
-                _chat.Send(_current, text);
+            var items = _attachments.ToList();
+            var caption = items.Count == 1 ? text : "";
             _attachments.Clear();
+            InputBox.Clear();
+            recipients = 0;
+            foreach (var item in items)
+            {
+                if (item.IsImage)
+                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption);
+                else
+                {
+                    // Большой файл сначала копируется в хранилище программы — это может занять время.
+                    if (item.Size > 50 * 1024 * 1024) ShowNotice($"Подготовка «{item.FileName}» к отправке…");
+                    try
+                    {
+                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption);
+                    }
+                    catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+                    {
+                        Log.Error($"Не удалось подготовить файл {item.SourcePath} к отправке", ex);
+                        ShowNotice($"Не удалось отправить «{item.FileName}»: {ex.Message}");
+                        return;
+                    }
+                }
+            }
+            if (items.Count > 1 && text.Length > 0)
+                _chat.Send(contact, text);
         }
         else
         {
-            recipients = _chat.Send(_current, text);
+            recipients = _chat.Send(contact, text);
         }
+        if (contact != _current) return;
 
         if (_current.IsEveryone)
         {
@@ -319,30 +340,24 @@ public partial class MainWindow : Window
         InputBox.Focus();
     }
 
-    // ---- Изображения: прикрепление ----
+    // ---- Вложения: прикрепление ----
 
     private void Attach_Click(object sender, RoutedEventArgs e)
     {
         var patterns = string.Join(";", ImageStore.Extensions.Select(x => "*" + x));
         var dialog = new Microsoft.Win32.OpenFileDialog
         {
-            Title = "Выберите изображения",
-            Filter = $"Изображения ({patterns})|{patterns}|Все файлы (*.*)|*.*",
+            Title = "Выберите файлы или изображения",
+            Filter = $"Все файлы (*.*)|*.*|Изображения ({patterns})|{patterns}",
             Multiselect = true,
         };
         if (dialog.ShowDialog(this) != true) return;
 
         var errors = new List<string>();
-        var images = new List<PendingImage>();
-        foreach (var file in dialog.FileNames)
-        {
-            if (PendingImage.FromFile(file, out var error) is { } image) images.Add(image);
-            else if (error != null) errors.Add(error);
-        }
-        AddAttachments(images, errors);
+        AddAttachments(PendingAttachment.FromFiles(dialog.FileNames, errors), errors);
     }
 
-    private void AddAttachments(List<PendingImage> images, List<string> errors)
+    private void AddAttachments(List<PendingAttachment> images, List<string> errors)
     {
         foreach (var image in images)
             _attachments.Add(image);
@@ -351,28 +366,28 @@ public partial class MainWindow : Window
             ShowNotice("Не прикреплено: " + string.Join("; ", errors));
         else if (images.Count > 0)
             ShowNotice(_attachments.Count == 1
-                ? "Изображение прикреплено. Напишите подпись (необязательно) и нажмите «Отправить»."
-                : $"Прикреплено изображений: {_attachments.Count}. Нажмите «Отправить».");
+                ? $"{(_attachments[0].IsImage ? "Изображение" : "Файл")} прикреплён(о). Напишите подпись (необязательно) и нажмите «Отправить»."
+                : $"Прикреплено: {_attachments.Count}. Нажмите «Отправить».");
         InputBox.Focus();
     }
 
     private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is PendingImage image)
+        if ((sender as FrameworkElement)?.DataContext is PendingAttachment image)
             _attachments.Remove(image);
         if (_attachments.Count == 0) NoticeText.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>
-    /// Вставлять ли из буфера как изображение. Если там есть текст (Word, Excel кладут ещё и картинку),
-    /// вставляем текст как обычно; файлы-изображения и скриншоты — прикрепляем.
+    /// Вставлять ли из буфера как вложение. Если там есть текст (Word, Excel кладут ещё и картинку),
+    /// вставляем текст как обычно; скопированные файлы и скриншоты — прикрепляем.
     /// </summary>
     private static bool ClipboardHasImageToAttach()
     {
         try
         {
             var data = Clipboard.GetDataObject();
-            if (data == null || !PendingImage.ContainsImage(data)) return false;
+            if (data == null || !PendingAttachment.ContainsAttachment(data)) return false;
             return data.GetDataPresent(DataFormats.FileDrop) || !data.GetDataPresent(DataFormats.UnicodeText);
         }
         catch (System.Runtime.InteropServices.COMException)
@@ -395,7 +410,7 @@ public partial class MainWindow : Window
 
         var errors = new List<string>();
         var data = Clipboard.GetDataObject();
-        var images = data == null ? new List<PendingImage>() : PendingImage.FromDataObject(data, errors);
+        var images = data == null ? new List<PendingAttachment>() : PendingAttachment.FromDataObject(data, errors);
         AddAttachments(images, errors);
     }
 
@@ -403,7 +418,7 @@ public partial class MainWindow : Window
 
     private void ChatPanel_PreviewDragOver(object sender, DragEventArgs e)
     {
-        if (_current == null || !PendingImage.ContainsImage(e.Data)) return;
+        if (_current == null || !PendingAttachment.ContainsAttachment(e.Data)) return;
         e.Effects = DragDropEffects.Copy;
         e.Handled = true;
         DropOverlay.Visibility = Visibility.Visible;
@@ -420,11 +435,11 @@ public partial class MainWindow : Window
     private void ChatPanel_PreviewDrop(object sender, DragEventArgs e)
     {
         DropOverlay.Visibility = Visibility.Collapsed;
-        if (_current == null || !PendingImage.ContainsImage(e.Data)) return;
+        if (_current == null || !PendingAttachment.ContainsAttachment(e.Data)) return;
         e.Handled = true;
 
         var errors = new List<string>();
-        AddAttachments(PendingImage.FromDataObject(e.Data, errors), errors);
+        AddAttachments(PendingAttachment.FromDataObject(e.Data, errors), errors);
         Activate();
     }
 
@@ -459,6 +474,23 @@ public partial class MainWindow : Window
     private void ImageOpenExternal_Click(object sender, RoutedEventArgs e)
     {
         if (MessageOf(sender) is { } message) ImageViewerWindow.OpenExternal(message);
+    }
+
+    // ---- Файлы в ленте ----
+
+    private void FileOpen_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) FileActions.Open(message, this);
+    }
+
+    private void FileSave_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) FileActions.SaveAs(message, this);
+    }
+
+    private void FileShowInFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { } message) FileActions.ShowInFolder(message, this);
     }
 
     private void OpenImage(ChatMessage message)

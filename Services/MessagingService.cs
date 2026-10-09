@@ -24,11 +24,13 @@ public sealed class MessagingService : IDisposable
     private readonly Dictionary<string, SendFailure> _lastFailure = new();
 
     private const int MaxFrameSize = 1024 * 1024;
-    // Двоичное вложение (изображение) идёт сразу после JSON-заголовка отдельным блоком.
-    private const long MaxPayloadSize = ImageStore.MaxBytes;
+    // Двоичное вложение (изображение, файл) идёт сразу после JSON-заголовка отдельным блоком.
+    private const long MaxPayloadSize = FileStore.MaxBytes;
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
-    // С запасом на передачу изображения до 20 МБ по медленной сети.
     private static readonly TimeSpan ExchangeTimeout = TimeSpan.FromSeconds(60);
+    // На вложение даём время из расчёта медленной сети: не меньше 256 КБ/с.
+    private const long MinBytesPerSecond = 256 * 1024;
+    private const int CopyBufferSize = 256 * 1024;
 
     private readonly SynchronizationContext _uiContext;
     private readonly CancellationTokenSource _cts = new();
@@ -62,11 +64,14 @@ public sealed class MessagingService : IDisposable
         _ = AcceptLoopAsync(_cts.Token);
     }
 
-    /// <summary>Отправляет пакет и ждёт подтверждения. Возвращает true, если получатель его принял.</summary>
-    public async Task<bool> SendAsync(IPAddress address, int port, ChatPacket packet)
+    /// <summary>
+    /// Отправляет пакет и ждёт подтверждения. Возвращает true, если получатель его принял.
+    /// <paramref name="progress"/> — доля отправленного вложения (0…1), если оно есть.
+    /// </summary>
+    public async Task<bool> SendAsync(IPAddress address, int port, ChatPacket packet, IProgress<double>? progress = null)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
-        timeout.CancelAfter(ExchangeTimeout);
+        timeout.CancelAfter(TimeoutFor(packet.PayloadLength));
         var connected = false;
         try
         {
@@ -79,8 +84,8 @@ public sealed class MessagingService : IDisposable
             connected = true;
 
             var stream = client.GetStream();
-            await WriteFrameAsync(stream, packet, timeout.Token);
-            var ack = await ReadFrameAsync(stream, timeout.Token);
+            await WriteFrameAsync(stream, packet, timeout.Token, progress);
+            var ack = await ReadHeaderAsync(stream, timeout.Token);
             var delivered = ack is { Type: ChatPacket.Ack } && ack.Id == packet.Id;
             if (!delivered) RecordFailure(address, port, packet, SendFailure.Other, "нет подтверждения");
             else lock (_lastFailure) _lastFailure.Remove(Key(address, port));
@@ -103,6 +108,9 @@ public sealed class MessagingService : IDisposable
     }
 
     private static string Key(IPAddress address, int port) => $"{address}:{port}";
+
+    private static TimeSpan TimeoutFor(long payloadLength) =>
+        ExchangeTimeout + TimeSpan.FromSeconds((double)payloadLength / MinBytesPerSecond);
 
     /// <summary>Переводим сетевую ошибку в понятную причину — её видно в логе и в статусе сообщения.</summary>
     private static (SendFailure Kind, string Reason) Classify(Exception ex, bool connected)
@@ -157,39 +165,94 @@ public sealed class MessagingService : IDisposable
         using var _ = client;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ExchangeTimeout);
+        string? tempFile = null;
         try
         {
             var stream = client.GetStream();
-            var packet = await ReadFrameAsync(stream, timeout.Token).ConfigureAwait(false);
+            var packet = await ReadHeaderAsync(stream, timeout.Token).ConfigureAwait(false);
             if (packet == null || packet.App != ChatPacket.AppTag) return;
+            var from = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.MapToIPv4();
 
+            if (packet.PayloadLength > 0)
+            {
+                // Вложение пишем прямо на диск — файл может быть больше, чем разумно держать в памяти.
+                tempFile = FileStore.NewIncomingTempFile(packet.PayloadLength);
+                timeout.CancelAfter(TimeoutFor(packet.PayloadLength));
+                await using (var file = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None,
+                                 CopyBufferSize, useAsync: true))
+                    await CopyExactlyAsync(stream, file, packet.PayloadLength, null, timeout.Token).ConfigureAwait(false);
+                packet.ReceivedPayloadPath = tempFile;
+            }
+
+            // Подтверждаем только когда всё, включая вложение, уже на диске.
             await WriteFrameAsync(stream, new ChatPacket { Type = ChatPacket.Ack, Id = packet.Id }, timeout.Token)
                 .ConfigureAwait(false);
+            tempFile = null; // теперь файлом распоряжается получатель пакета
 
-            var from = ((IPEndPoint)client.Client.RemoteEndPoint!).Address.MapToIPv4();
-            if (packet.Type != ChatPacket.Ack)
-                Log.Info($"Получен «{packet.Type}» от «{packet.FromName}» ({from}:{packet.FromPort})");
+            Log.Info($"Получен «{packet.Type}» от «{packet.FromName}» ({from}:{packet.FromPort})" +
+                     (packet.PayloadLength > 0 ? $", вложение {packet.PayloadLength / 1024} КБ" : ""));
             _uiContext.Post(_ => PacketReceived?.Invoke(packet, from), null);
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException
-                                       or JsonException or ObjectDisposedException)
+                                       or JsonException or ObjectDisposedException or UnauthorizedAccessException)
         {
             // Обрыв или мусор от чужой программы — просто закрываем соединение.
+            if (ex is IOException { Message: var message } && message.StartsWith("Недостаточно", StringComparison.Ordinal))
+                Log.Warn(message);
+        }
+        finally
+        {
+            if (tempFile != null) FileStore.DeleteQuietly(tempFile);
         }
     }
 
-    private static async Task WriteFrameAsync(NetworkStream stream, ChatPacket packet, CancellationToken ct)
+    private static async Task WriteFrameAsync(NetworkStream stream, ChatPacket packet, CancellationToken ct,
+        IProgress<double>? progress = null)
     {
         var body = JsonSerializer.SerializeToUtf8Bytes(packet);
         var header = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(header, body.Length);
         await stream.WriteAsync(header, ct).ConfigureAwait(false);
         await stream.WriteAsync(body, ct).ConfigureAwait(false);
+
         if (packet.Payload is { Length: > 0 } payload)
+        {
             await stream.WriteAsync(payload, ct).ConfigureAwait(false);
+        }
+        else if (packet.PayloadPath is { } path && packet.PayloadLength > 0)
+        {
+            await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                CopyBufferSize, useAsync: true);
+            await CopyExactlyAsync(file, stream, packet.PayloadLength, progress, ct).ConfigureAwait(false);
+        }
     }
 
-    private static async Task<ChatPacket?> ReadFrameAsync(NetworkStream stream, CancellationToken ct)
+    /// <summary>Копирует ровно <paramref name="length"/> байт, сообщая долю скопированного.</summary>
+    private static async Task CopyExactlyAsync(Stream source, Stream target, long length,
+        IProgress<double>? progress, CancellationToken ct)
+    {
+        var buffer = new byte[CopyBufferSize];
+        long done = 0;
+        var lastReported = -1;
+        while (done < length)
+        {
+            var read = await source.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, length - done)), ct)
+                .ConfigureAwait(false);
+            if (read == 0) throw new EndOfStreamException("Передача оборвалась.");
+            await target.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+            done += read;
+
+            var percent = (int)(done * 100 / length);
+            if (progress != null && percent != lastReported)
+            {
+                lastReported = percent;
+                progress.Report((double)done / length);
+            }
+        }
+    }
+
+    /// <summary>Читает JSON-заголовок пакета (вложение, если есть, читается отдельно).</summary>
+    private static async Task<ChatPacket?> ReadHeaderAsync(NetworkStream stream, CancellationToken ct)
     {
         var header = new byte[4];
         await stream.ReadExactlyAsync(header, ct).ConfigureAwait(false);
@@ -200,14 +263,8 @@ public sealed class MessagingService : IDisposable
         var body = new byte[length];
         await stream.ReadExactlyAsync(body, ct).ConfigureAwait(false);
         var packet = JsonSerializer.Deserialize<ChatPacket>(body);
-
-        if (packet is { PayloadLength: > 0 })
-        {
-            if (packet.PayloadLength > MaxPayloadSize)
-                throw new IOException("Слишком большое вложение.");
-            packet.Payload = new byte[packet.PayloadLength];
-            await stream.ReadExactlyAsync(packet.Payload, ct).ConfigureAwait(false);
-        }
+        if (packet is { PayloadLength: > MaxPayloadSize })
+            throw new IOException("Слишком большое вложение.");
         return packet;
     }
 
@@ -253,8 +310,11 @@ public sealed class ChatPacket
     public const string GameMove = "game-move";
     public const string GameResign = "game-resign";
 
-    /// <summary>Изображение: файл <see cref="FileName"/>, байты — в <see cref="Payload"/>, подпись — в <see cref="Text"/>.</summary>
+    /// <summary>Изображение: имя <see cref="FileName"/>, байты — вложением, подпись — в <see cref="Text"/>.</summary>
     public const string Image = "image";
+
+    /// <summary>Файл любого типа: имя <see cref="FileName"/>, содержимое — вложением, подпись — в <see cref="Text"/>.</summary>
+    public const string File = "file";
 
     public string App { get; set; } = AppTag;
     public string Type { get; set; } = Message;
@@ -278,7 +338,7 @@ public sealed class ChatPacket
     /// <summary>Размер двоичного вложения, которое идёт следом за JSON.</summary>
     public long PayloadLength { get; set; }
 
-    /// <summary>Само вложение — в JSON не попадает, передаётся отдельным блоком.</summary>
+    /// <summary>Вложение из памяти — в JSON не попадает, передаётся отдельным блоком.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public byte[]? Payload
     {
@@ -290,6 +350,23 @@ public sealed class ChatPacket
         }
     }
     private byte[]? _payload;
+
+    /// <summary>Вложение из файла на диске — отправляется потоком, не загружаясь в память.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? PayloadPath
+    {
+        get => _payloadPath;
+        set
+        {
+            _payloadPath = value;
+            PayloadLength = value != null ? new FileInfo(value).Length : 0;
+        }
+    }
+    private string? _payloadPath;
+
+    /// <summary>У получателя: временный файл с принятым вложением (его нужно перенести на место или удалить).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? ReceivedPayloadPath { get; set; }
 
     public Guid GameId { get; set; }
     public int Cell { get; set; }

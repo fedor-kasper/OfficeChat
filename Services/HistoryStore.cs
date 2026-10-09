@@ -51,12 +51,10 @@ public sealed class HistoryStore : IDisposable
             if (info.ExecuteScalar() == null)
                 Execute("ALTER TABLE messages ADD COLUMN kind INTEGER NOT NULL DEFAULT 0");
         }
-        // Колонка file_name — с изображениями.
-        using (var info = Command("SELECT 1 FROM pragma_table_info('messages') WHERE name = 'file_name'"))
-        {
-            if (info.ExecuteScalar() == null)
-                Execute("ALTER TABLE messages ADD COLUMN file_name TEXT NOT NULL DEFAULT ''");
-        }
+        // Колонки, появившиеся с изображениями и файлами, — добавляем в базы, созданные раньше.
+        AddColumnIfMissing("file_name", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("file_path", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("file_size", "INTEGER NOT NULL DEFAULT 0");
     }
 
     // ---- Контакты ----
@@ -144,8 +142,9 @@ public sealed class HistoryStore : IDisposable
     public void SaveMessage(Guid peerId, ChatMessage message)
     {
         using var cmd = Command("""
-            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name)
-            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName)
+            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size)
+            VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
+                    $filePath, $fileSize)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt
             """);
         cmd.Parameters.AddWithValue("$id", message.Id.ToString());
@@ -159,6 +158,8 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$receipt", message.ReadReceiptSent);
         cmd.Parameters.AddWithValue("$kind", (int)message.Kind);
         cmd.Parameters.AddWithValue("$fileName", message.FileName);
+        cmd.Parameters.AddWithValue("$filePath", message.FilePath);
+        cmd.Parameters.AddWithValue("$fileSize", message.FileSize);
         cmd.ExecuteNonQuery();
     }
 
@@ -198,21 +199,40 @@ public sealed class HistoryStore : IDisposable
         return result;
     }
 
-    /// <summary>Удаляет переписку вместе с файлами её изображений.</summary>
+    /// <summary>Удаляет переписку вместе с файлами её изображений и вложений.</summary>
     public void DeleteConversation(Guid peerId)
     {
         var images = ImagePaths(peerId);
+        var files = new List<string>();
+        using (var list = Command($"SELECT DISTINCT file_path FROM messages WHERE peer_id = $peer AND kind = {(int)MessageKind.File}"))
+        {
+            list.Parameters.AddWithValue("$peer", peerId.ToString());
+            using var reader = list.ExecuteReader();
+            while (reader.Read()) files.Add(reader.GetString(0));
+        }
+
         using var cmd = Command("DELETE FROM messages WHERE peer_id = $peer");
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
         cmd.ExecuteNonQuery();
         foreach (var path in images)
             ImageStore.Delete(path);
+        // Файл рассылки «Всем» хранится один на всех — удаляем, только если он больше нигде не нужен.
+        foreach (var path in files.Where(p => !IsFileReferenced(p)))
+            FileStore.Delete(path);
+    }
+
+    /// <summary>Ссылается ли на этот файл хоть одно сообщение.</summary>
+    public bool IsFileReferenced(string path)
+    {
+        using var cmd = Command("SELECT 1 FROM messages WHERE file_path = $path LIMIT 1");
+        cmd.Parameters.AddWithValue("$path", path);
+        return cmd.ExecuteScalar() != null;
     }
 
     // ---- Служебное ----
 
     private const string MessageColumns =
-        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name";
+        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size";
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -238,6 +258,8 @@ public sealed class HistoryStore : IDisposable
                 Kind = kind,
                 FileName = fileName,
                 ImagePath = kind == MessageKind.Image ? ImageStore.PathFor(id, fileName) : "",
+                FilePath = reader.GetString(10),
+                FileSize = reader.GetInt64(11),
             });
         }
         return result;
@@ -248,6 +270,13 @@ public sealed class HistoryStore : IDisposable
         var cmd = _db.CreateCommand();
         cmd.CommandText = sql;
         return cmd;
+    }
+
+    private void AddColumnIfMissing(string column, string definition)
+    {
+        using var info = Command($"SELECT 1 FROM pragma_table_info('messages') WHERE name = '{column}'");
+        if (info.ExecuteScalar() == null)
+            Execute($"ALTER TABLE messages ADD COLUMN {column} {definition}");
     }
 
     private void Execute(string sql)
