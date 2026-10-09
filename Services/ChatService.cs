@@ -300,6 +300,55 @@ public sealed class ChatService : IDisposable
         _ = FlushAsync(contact);
     }
 
+    /// <summary>
+    /// Отправляет файл любого типа (с необязательной подписью). Файл копируется в хранилище программы
+    /// (в фоне — он может быть большим), чтобы его можно было отправить позже и открыть из истории.
+    /// Для «Все» — каждому, кто в сети; копия файла при этом одна на всех. Возвращает число получателей.
+    /// </summary>
+    public async Task<int> SendFileAsync(Contact contact, string sourcePath, string caption)
+    {
+        var recipients = contact.IsEveryone
+            ? _contactsByPeer.Values.Where(c => c.IsOnline).ToList()
+            : new List<Contact> { contact };
+        if (recipients.Count == 0) return 0;
+
+        var fileName = Path.GetFileName(sourcePath);
+        var storedPath = FileStore.NewPath(Guid.NewGuid(), fileName);
+        await Task.Run(() => File.Copy(sourcePath, storedPath, overwrite: true));
+        var size = new FileInfo(storedPath).Length;
+
+        foreach (var recipient in recipients)
+        {
+            var message = new ChatMessage
+            {
+                Id = Guid.NewGuid(),
+                IsOutgoing = true,
+                Kind = MessageKind.File,
+                Text = caption,
+                FileName = fileName,
+                FilePath = storedPath,
+                FileSize = size,
+                Timestamp = DateTime.Now,
+                IsBroadcast = contact.IsEveryone,
+                Status = MessageStatus.Queued,
+                PeerOffline = !recipient.IsOnline,
+            };
+            recipient.Messages.Add(message);
+            _store.SaveContact(recipient.Peer!);
+            Save(recipient, message);
+            _ = FlushAsync(recipient);
+        }
+        Log.Info($"Файл «{fileName}» ({size / 1024} КБ) поставлен в очередь для {recipients.Count} получателей");
+        return recipients.Count;
+    }
+
+    /// <summary>Удаляет файл вложения, если на него больше не ссылается ни одно сообщение.</summary>
+    private void DeleteFileIfUnused(ChatMessage message)
+    {
+        if (message.IsFile && message.FilePath.Length > 0 && !_store.IsFileReferenced(message.FilePath))
+            FileStore.Delete(message.FilePath);
+    }
+
     /// <summary>Отменяет отправку сообщения, которое ещё ждёт в очереди.</summary>
     public bool Cancel(ChatMessage message)
     {
@@ -310,6 +359,7 @@ public sealed class ChatService : IDisposable
         contact.Messages.Remove(message);
         _store.DeleteMessage(message.Id);
         if (message.IsImage) ImageStore.Delete(message.ImagePath);
+        DeleteFileIfUnused(message);
         RemoveIfForgotten(contact);
         return true;
     }
@@ -392,24 +442,27 @@ public sealed class ChatService : IDisposable
                     IsBroadcast = message.IsBroadcast,
                     FileName = message.FileName,
                 };
-                if (message.IsImage)
+                if (message.IsImage || message.IsFile)
                 {
-                    // Байты читаем с диска при каждой попытке — очередь переживает перезапуск программы.
-                    try
+                    // Вложение уходит потоком прямо с диска — очередь переживает перезапуск, а большой файл
+                    // не загружается в память целиком.
+                    var attachment = message.IsImage ? message.ImagePath : message.FilePath;
+                    if (!File.Exists(attachment))
                     {
-                        packet.Payload = await File.ReadAllBytesAsync(message.ImagePath);
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                        Log.Error($"Файл изображения {message.ImagePath} недоступен — убираем сообщение из очереди", ex);
+                        Log.Error($"Файл вложения {attachment} пропал — убираем сообщение из очереди");
                         contact.Messages.Remove(message);
                         _store.DeleteMessage(message.Id);
                         continue;
                     }
+                    packet.Type = message.IsImage ? ChatPacket.Image : ChatPacket.File;
+                    packet.PayloadPath = attachment;
                 }
 
                 message.Status = MessageStatus.Sending;
-                var delivered = await _messaging.SendAsync(peer.Address, peer.Port, packet);
+                message.TransferProgress = 0;
+                var delivered = await _messaging.SendAsync(peer.Address, peer.Port, packet,
+                    packet.PayloadLength > 0 ? new Progress<double>(p => message.TransferProgress = p) : null);
+                message.TransferProgress = 0;
 
                 if (!delivered)
                 {
@@ -472,10 +525,15 @@ public sealed class ChatService : IDisposable
         _discovery.Observe(packet.From, packet.FromName, packet.FromMachine, from, packet.FromPort);
         var contact = GetOrAddContact(_discovery.Find(packet.From)!);
 
+        // Вложение пришло к пакету, которому оно не положено (чужая версия) — не оставляем мусор.
+        if (packet.ReceivedPayloadPath != null && packet.Type is not (ChatPacket.Image or ChatPacket.File))
+            FileStore.DeleteQuietly(packet.ReceivedPayloadPath);
+
         switch (packet.Type)
         {
             case ChatPacket.Message:
             case ChatPacket.Image:
+            case ChatPacket.File:
                 ReceiveMessage(contact, packet);
                 break;
             case not null when packet.Type.StartsWith("game-", StringComparison.Ordinal):
@@ -492,21 +550,47 @@ public sealed class ChatService : IDisposable
 
     private void ReceiveMessage(Contact contact, ChatPacket packet)
     {
-        // Повтор, если до отправителя не дошло наше подтверждение.
-        if (_store.HasMessage(packet.Id)) return;
+        var received = packet.ReceivedPayloadPath;
 
-        var isImage = packet.Type == ChatPacket.Image;
-        var imagePath = "";
-        if (isImage)
+        // Повтор, если до отправителя не дошло наше подтверждение.
+        if (_store.HasMessage(packet.Id))
         {
-            if (packet.Payload is not { Length: > 0 }) return;
+            if (received != null) FileStore.DeleteQuietly(received);
+            return;
+        }
+
+        var kind = packet.Type switch
+        {
+            ChatPacket.Image => MessageKind.Image,
+            ChatPacket.File => MessageKind.File,
+            _ => MessageKind.Text,
+        };
+        var imagePath = "";
+        var filePath = "";
+        long fileSize = 0;
+        if (kind != MessageKind.Text)
+        {
+            if (received == null) return;
             try
             {
-                imagePath = ImageStore.Save(packet.Id, packet.FileName, packet.Payload);
+                // Принятое вложение уже на диске во временном файле — переносим его на место.
+                if (kind == MessageKind.Image)
+                {
+                    Directory.CreateDirectory(ImageStore.Folder);
+                    imagePath = ImageStore.PathFor(packet.Id, packet.FileName);
+                    File.Move(received, imagePath, overwrite: true);
+                }
+                else
+                {
+                    filePath = FileStore.NewPath(packet.Id, packet.FileName);
+                    File.Move(received, filePath, overwrite: true);
+                    fileSize = new FileInfo(filePath).Length;
+                }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                Log.Error($"Не удалось сохранить изображение от «{contact.Title}»", ex);
+                Log.Error($"Не удалось сохранить вложение «{packet.FileName}» от «{contact.Title}»", ex);
+                FileStore.DeleteQuietly(received);
                 return;
             }
         }
@@ -515,10 +599,12 @@ public sealed class ChatService : IDisposable
         {
             Id = packet.Id,
             IsOutgoing = false,
-            Kind = isImage ? MessageKind.Image : MessageKind.Text,
+            Kind = kind,
             Text = packet.Text,
-            FileName = packet.FileName,
+            FileName = FileStore.SafeFileName(packet.FileName),
             ImagePath = imagePath,
+            FilePath = filePath,
+            FileSize = fileSize,
             Timestamp = packet.SentAt.LocalDateTime,
             IsBroadcast = packet.IsBroadcast,
         };

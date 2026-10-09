@@ -37,6 +37,27 @@
                             </ContextMenu>
                         </Border.ContextMenu>
                     </Border>
+                    <!-- Файл: значок по типу, имя, размер и действия -->
+                    <Border Visibility="{Binding IsFile, Converter={StaticResource BoolToVisibility}}"
+                            Margin="0,0,0,4" Padding="10,8" CornerRadius="8" Background="#0F000000" MinWidth="250">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding FileIcon}" FontSize="30"
+                                       VerticalAlignment="Center" Margin="0,0,10,0" />
+                            <StackPanel>
+                                <TextBlock Text="{Binding FileName}" FontSize="14" FontWeight="SemiBold" MaxWidth="320"
+                                           TextTrimming="CharacterEllipsis" ToolTip="{Binding FileName}" />
+                                <TextBlock Text="{Binding FileSizeText}" FontSize="11"
+                                           Foreground="{StaticResource MutedTextBrush}" />
+                                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                    <Button Content="Открыть" Padding="10,2" FontSize="12" Click="FileOpen_Click" />
+                                    <Button Content="Сохранить как…" Padding="10,2" FontSize="12" Margin="6,0,0,0"
+                                            Click="FileSave_Click" />
+                                    <Button Content="Показать в папке" Padding="10,2" FontSize="12" Margin="6,0,0,0"
+                                            Click="FileShowInFolder_Click" />
+                                </StackPanel>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
                     <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
                              FontSize="14" BorderThickness="0" Background="Transparent" Padding="0"
                              Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
@@ -202,7 +223,16 @@
                                     <Grid Width="84" Height="84" Margin="0,0,8,0" ToolTip="{Binding FileName}">
                                         <Border CornerRadius="8" Background="#F3F5F8" BorderBrush="#E2E5EA"
                                                 BorderThickness="1">
-                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Margin="2" />
+                                            <Grid>
+                                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" Margin="2"
+                                                       Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}" />
+                                                <!-- Файл: значок и имя -->
+                                                <StackPanel Margin="4,6,4,16" Visibility="{Binding IsFile, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock Text="{Binding Icon}" FontSize="24" HorizontalAlignment="Center" />
+                                                    <TextBlock Text="{Binding FileName}" FontSize="10" TextAlignment="Center"
+                                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="28" />
+                                                </StackPanel>
+                                            </Grid>
                                         </Border>
                                         <Border VerticalAlignment="Bottom" Background="#99000000" CornerRadius="0,0,8,8">
                                             <TextBlock Text="{Binding SizeText}" Foreground="White" FontSize="10"
@@ -219,7 +249,7 @@
                     </ScrollViewer>
 
                     <Button DockPanel.Dock="Left" Content="📎" Width="36" Margin="0,0,6,0" FontSize="16"
-                            ToolTip="Прикрепить изображение (также можно перетащить файл в окно или вставить Ctrl+V)"
+                            ToolTip="Прикрепить файл или изображение (также можно перетащить файлы в окно или вставить Ctrl+V)"
                             Click="Attach_Click" />
                     <Button DockPanel.Dock="Right" Content="Отправить" Margin="8,0,0,0" Padding="14,0"
                             VerticalAlignment="Stretch" Click="Send_Click" />
@@ -250,8 +280,8 @@
                 <Border x:Name="DropOverlay" Margin="12" CornerRadius="12" Background="#E6EFF6FF"
                         BorderBrush="#2563EB" BorderThickness="2" IsHitTestVisible="False" Visibility="Collapsed">
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <TextBlock Text="🖼" FontSize="40" HorizontalAlignment="Center" />
-                        <TextBlock Text="Отпустите, чтобы прикрепить изображение" FontSize="16" FontWeight="SemiBold"
+                        <TextBlock Text="📎" FontSize="40" HorizontalAlignment="Center" />
+                        <TextBlock Text="Отпустите, чтобы прикрепить файлы" FontSize="16" FontWeight="SemiBold"
                                    Foreground="#1E3A8A" Margin="0,6,0,0" />
                     </StackPanel>
                 </Border>
