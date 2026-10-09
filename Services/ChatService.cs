@@ -52,6 +52,9 @@ public sealed class ChatService : IDisposable
 
     public int TotalUnread => _contactsByPeer.Values.Sum(c => c.UnreadCount);
 
+    /// <summary>TCP-порт, на котором принимаем сообщения.</summary>
+    public int MessagingPort => _messaging.Port;
+
     public int OnlineCount => _contactsByPeer.Values.Count(c => c.IsOnline);
 
     public ChatService(AppSettings settings)
@@ -411,9 +414,16 @@ public sealed class ChatService : IDisposable
                 if (!delivered)
                 {
                     message.PeerOffline = !peer.IsOnline;
+                    message.FailureHint = _messaging.LastFailureFor(peer.Address, peer.Port) switch
+                    {
+                        SendFailure.NoAnswer => "Компьютер получателя не отвечает: вероятно, его брандмауэр блокирует OfficeChat",
+                        SendFailure.Refused => "OfficeChat у получателя не принимает подключения",
+                        _ => "",
+                    };
                     message.Status = MessageStatus.Queued;
                     return;
                 }
+                message.FailureHint = "";
                 MarkReachable(peer);
                 // Отметка «прочитано» могла прийти раньше, чем мы обработали подтверждение.
                 if (message.Status == MessageStatus.Sending)

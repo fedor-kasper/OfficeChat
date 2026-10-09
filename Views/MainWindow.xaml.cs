@@ -63,6 +63,7 @@ public partial class MainWindow : Window
         CommandManager.AddPreviewExecutedHandler(InputBox, InputBox_PreviewPaste);
 
         _chat.Start();
+        _ = CheckFirewallAsync();
 
         Activated += (_, _) =>
         {
@@ -84,6 +85,35 @@ public partial class MainWindow : Window
         // Если эта переписка уже открыта перед глазами — всплывать незачем.
         if (!_chat.IsConversationVisible(contact))
             _notifications.Show(contact, message);
+    }
+
+    // ---- Брандмауэр ----
+
+    private async Task CheckFirewallAsync()
+    {
+        var port = _chat.MessagingPort;
+        var state = await Task.Run(() => FirewallService.Check(port));
+        FirewallBanner.Visibility = state == FirewallState.Blocked ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private async void AllowFirewall_Click(object sender, RoutedEventArgs e)
+    {
+        FirewallButton.IsEnabled = false;
+        try
+        {
+            var ok = await Task.Run(FirewallService.AllowIncoming);
+            await CheckFirewallAsync();
+            if (!ok)
+                MessageBox.Show(this,
+                    "Правило не добавлено: нужны права администратора.\n\n" +
+                    "Если у вас их нет, попросите администратора разрешить OfficeChat в брандмауэре Windows " +
+                    "(Панель управления → Брандмауэр Защитника Windows → Разрешение взаимодействия с приложением).",
+                    "OfficeChat", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            FirewallButton.IsEnabled = true;
+        }
     }
 
     // ---- Крестики-нолики ----

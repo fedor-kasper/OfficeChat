@@ -79,6 +79,18 @@ public sealed class ChatMessage : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Почему не уходит, если адресат в сети, но доставка не удалась (пусто — причина неизвестна).</summary>
+    public string FailureHint
+    {
+        get => _failureHint;
+        set
+        {
+            if (Set(ref _failureHint, value))
+                OnPropertyChanged(nameof(StatusText));
+        }
+    }
+    private string _failureHint = "";
+
     /// <summary>Отменить можно только то, что ещё не ушло адресату.</summary>
     public bool CanCancel => IsOutgoing && Status == MessageStatus.Queued;
 
@@ -86,7 +98,9 @@ public sealed class ChatMessage : INotifyPropertyChanged
     {
         MessageStatus.Queued => PeerOffline
             ? "⏳ Адресат не в сети — отправится, когда он появится"
-            : "⏳ Не удалось отправить — повторяем…",
+            : FailureHint.Length > 0
+                ? $"⏳ {FailureHint} — повторяем…"
+                : "⏳ Не удалось отправить — повторяем…",
         MessageStatus.Sending => "Отправляется…",
         MessageStatus.Delivered => "✓ Доставлено",
         MessageStatus.Read => "✓✓ Прочитано",

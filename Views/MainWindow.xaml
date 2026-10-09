@@ -90,6 +90,19 @@
                 </DockPanel>
             </Border>
 
+            <!-- Брандмауэр не пропускает входящие: к нам не смогут подключиться -->
+            <Border x:Name="FirewallBanner" DockPanel.Dock="Bottom" Margin="10" Padding="10,8" CornerRadius="8"
+                    Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="#78350F"
+                               Text="⚠ Брандмауэр Windows не пропускает входящие подключения к OfficeChat — вам не смогут написать или прислать изображение." />
+                    <Button x:Name="FirewallButton" Content="Разрешить" Margin="0,8,0,0" Padding="12,4"
+                            HorizontalAlignment="Left" Style="{StaticResource FlatButton}" Background="#D97706"
+                            ToolTip="Добавит правило брандмауэра для всех типов сети. Windows попросит права администратора."
+                            Click="AllowFirewall_Click" />
+                </StackPanel>
+            </Border>
+
             <TextBlock DockPanel.Dock="Top" x:Name="OnlineCountText" Margin="14,10,14,4"
                        FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
 

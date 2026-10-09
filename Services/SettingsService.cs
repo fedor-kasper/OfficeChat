@@ -19,7 +19,8 @@ public sealed class AppSettings
 public static class SettingsService
 {
     public static string DataFolder { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OfficeChat");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData,
+            Environment.SpecialFolderOption.Create), "OfficeChat");
 
     private static string SettingsPath => Path.Combine(DataFolder, "settings.json");
 

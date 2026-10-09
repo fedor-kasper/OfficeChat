@@ -21,6 +21,7 @@ public sealed class MessagingService : IDisposable
 
     // Чтобы недоступный собеседник не засыпал лог: об ошибке отправки на адрес пишем не чаще раза в минуту.
     private readonly Dictionary<string, DateTime> _lastFailureLog = new();
+    private readonly Dictionary<string, SendFailure> _lastFailure = new();
 
     private const int MaxFrameSize = 1024 * 1024;
     // Двоичное вложение (изображение) идёт сразу после JSON-заголовка отдельным блоком.
@@ -66,6 +67,7 @@ public sealed class MessagingService : IDisposable
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
         timeout.CancelAfter(ExchangeTimeout);
+        var connected = false;
         try
         {
             using var client = new TcpClient(AddressFamily.InterNetwork);
@@ -74,25 +76,56 @@ public sealed class MessagingService : IDisposable
                 connectTimeout.CancelAfter(ConnectTimeout);
                 await client.ConnectAsync(address, port, connectTimeout.Token);
             }
+            connected = true;
 
             var stream = client.GetStream();
             await WriteFrameAsync(stream, packet, timeout.Token);
             var ack = await ReadFrameAsync(stream, timeout.Token);
             var delivered = ack is { Type: ChatPacket.Ack } && ack.Id == packet.Id;
-            if (!delivered) LogFailure(address, port, packet, "нет подтверждения");
+            if (!delivered) RecordFailure(address, port, packet, SendFailure.Other, "нет подтверждения");
+            else lock (_lastFailure) _lastFailure.Remove(Key(address, port));
             return delivered;
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException
                                        or JsonException or ObjectDisposedException)
         {
-            LogFailure(address, port, packet, ex is SocketException se ? se.SocketErrorCode.ToString() : ex.GetType().Name);
+            var (kind, reason) = Classify(ex, connected);
+            RecordFailure(address, port, packet, kind, reason);
             return false;
         }
     }
 
-    private void LogFailure(IPAddress address, int port, ChatPacket packet, string reason)
+    /// <summary>Почему не удалась последняя отправка на этот адрес (None — последняя удалась или не было).</summary>
+    public SendFailure LastFailureFor(IPAddress address, int port)
     {
-        var key = $"{address}:{port}";
+        lock (_lastFailure)
+            return _lastFailure.GetValueOrDefault(Key(address, port));
+    }
+
+    private static string Key(IPAddress address, int port) => $"{address}:{port}";
+
+    /// <summary>Переводим сетевую ошибку в понятную причину — её видно в логе и в статусе сообщения.</summary>
+    private static (SendFailure Kind, string Reason) Classify(Exception ex, bool connected)
+    {
+        if (!connected)
+        {
+            if (ex is OperationCanceledException || ex is SocketException { SocketErrorCode: SocketError.TimedOut })
+                return (SendFailure.NoAnswer,
+                    "компьютер не отвечает на подключение — входящие соединения, скорее всего, " +
+                    "блокирует брандмауэр на компьютере получателя (или компьютер выключен)");
+            if (ex is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
+                return (SendFailure.Refused, "подключение отклонено — OfficeChat у получателя не запущен");
+            if (ex is SocketException { SocketErrorCode: SocketError.HostUnreachable or SocketError.NetworkUnreachable } net)
+                return (SendFailure.NoAnswer, $"компьютер недоступен по сети ({net.SocketErrorCode})");
+        }
+        var code = ex is SocketException se ? se.SocketErrorCode.ToString() : ex.GetType().Name;
+        return (SendFailure.Other, connected ? $"соединение прервалось во время передачи ({code})" : code);
+    }
+
+    private void RecordFailure(IPAddress address, int port, ChatPacket packet, SendFailure kind, string reason)
+    {
+        var key = Key(address, port);
+        lock (_lastFailure) _lastFailure[key] = kind;
         lock (_lastFailureLog)
         {
             if (_lastFailureLog.TryGetValue(key, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(1))
@@ -184,6 +217,16 @@ public sealed class MessagingService : IDisposable
         _listener?.Stop();
         _cts.Dispose();
     }
+}
+
+public enum SendFailure
+{
+    None,
+    /// <summary>Нет ответа на подключение — обычно брандмауэр получателя или компьютер выключен.</summary>
+    NoAnswer,
+    /// <summary>Компьютер ответил отказом — программа не запущена.</summary>
+    Refused,
+    Other,
 }
 
 /// <summary>Пакет чата, передаётся как JSON.</summary>
