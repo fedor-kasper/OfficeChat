@@ -1,7 +1,8 @@
 # OfficeChat для Linux
 
 Linux-версия OfficeChat на [Avalonia UI](https://avaloniaui.net/). Протокол тот же, что у Windows-версии:
-компьютеры на Linux и Windows видят друг друга и переписываются, передают изображения, играют в крестики-нолики.
+компьютеры на Linux и Windows видят друг друга и переписываются, передают изображения и файлы (до 1 ГБ),
+играют в крестики-нолики.
 
 Сетевая часть, история, игра, изображения и лог — **общие файлы** из `../Services` и `../Models`
 (подключаются ссылками, не копируются). Здесь только интерфейс и то, что зависит от системы:
@@ -59,7 +60,7 @@ sudo ufw allow from 192.168.0.0/16 to any port 45679 proto tcp
 
 ## Данные
 
-- `~/.config/OfficeChat/` — настройки, история (`history.db`), изображения, логи (`logs/`)
+- `~/.config/OfficeChat/` — настройки, история (`history.db`), изображения (`images/`), файлы (`files/`), логи (`logs/`)
 - `~/.local/share/applications/officechat.desktop` — пункт меню
 - `~/.config/autostart/officechat.desktop` — автозапуск
 
