@@ -360,7 +360,11 @@ public partial class MainWindow : Window
     private void AddAttachments(List<PendingAttachment> images, List<string> errors)
     {
         foreach (var image in images)
+        {
+            // Тот же файл дважды не прикрепляем (например, Ctrl+V нажали повторно).
+            if (image.SourcePath != null && _attachments.Any(a => a.SourcePath == image.SourcePath)) continue;
             _attachments.Add(image);
+        }
 
         if (errors.Count > 0)
             ShowNotice("Не прикреплено: " + string.Join("; ", errors));
