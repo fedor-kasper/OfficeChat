@@ -1,0 +1,106 @@
+# Сборка OfficeChat: exe для Windows и AppImage для Linux.
+#
+# - каждый push и pull request — файлы появляются в Actions → запуск → «Artifacts»;
+# - метка вида v1.2.0 — дополнительно создаётся GitHub Release с этими файлами;
+# - вручную — кнопка «Run workflow» на вкладке Actions.
+#
+# Один и тот же файл в обеих ветках: AppImage собирается, только если в ветке есть Linux-версия
+# (папка OfficeChat.Linux).
+name: Сборка
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  windows:
+    name: Windows (exe)
+    # WPF-проект собирается и на Linux (EnableWindowsTargeting) — так быстрее, чем на Windows-машине.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Сборка OfficeChat.exe (один файл, .NET не нужен)
+        run: dotnet publish OfficeChat.csproj -p:PublishProfile=SingleExe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OfficeChat-windows-x64
+          path: bin/publish/OfficeChat.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Есть ли в ветке Linux-версия
+        id: check
+        run: |
+          if [ -f OfficeChat.Linux/build-appimage.sh ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "В этой ветке нет Linux-версии — AppImage не собираем."
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.check.outputs.present == 'true'
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Сборка AppImage
+        if: steps.check.outputs.present == 'true'
+        run: |
+          ./OfficeChat.Linux/build-appimage.sh
+          # Имя без версии — удобно для постоянной ссылки на последнюю сборку
+          mv OfficeChat.Linux/dist/OfficeChat-*-x86_64.AppImage OfficeChat.Linux/dist/OfficeChat-x86_64.AppImage
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.present == 'true'
+        with:
+          name: OfficeChat-linux-x86_64
+          path: OfficeChat.Linux/dist/OfficeChat-x86_64.AppImage
+          if-no-files-found: error
+
+  release:
+    name: Выпуск (GitHub Release)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Создание выпуска
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la artifacts
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "OfficeChat $GITHUB_REF_NAME" \
+            --generate-notes

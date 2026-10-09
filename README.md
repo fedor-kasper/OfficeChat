@@ -39,6 +39,20 @@ dotnet publish -p:PublishProfile=SingleExe
 
 Для разработки откройте `OfficeChat.slnx` в Visual Studio.
 
+## Автоматическая сборка (GitHub Actions)
+
+Файл `.github/workflows/build.yml` собирает программу на серверах GitHub — ничего ставить не нужно:
+
+- **каждый push** — на вкладке **Actions** откройте запуск «Сборка», внизу в **Artifacts** будут
+  `OfficeChat-windows-x64` (exe) и, в ветке с Linux-версией, `OfficeChat-linux-x86_64` (AppImage);
+- **выпуск для раздачи** — поставьте метку версии, и появится GitHub Release с обоими файлами:
+  ```
+  git tag v1.0.0
+  git push origin v1.0.0
+  ```
+  (или на GitHub: **Releases → Draft a new release → Choose a tag → v1.0.0**);
+- **вручную** — Actions → «Сборка» → **Run workflow**.
+
 ## Сеть
 
 Программа использует порты **UDP 45678** (поиск компьютеров) и **TCP 45679** (сообщения).
