@@ -1,0 +1,50 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="OfficeChat.Views.GamePanel"
+             Width="252">
+    <UserControl.Styles>
+        <!-- Клетка поля -->
+        <Style Selector="Button.cell">
+            <Setter Property="FontSize" Value="34" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Background" Value="White" />
+            <Setter Property="BorderBrush" Value="{StaticResource LineBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Margin" Value="3" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="0" />
+        </Style>
+        <Style Selector="Button.cell:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="#DBEAFE" />
+        </Style>
+        <Style Selector="Button.cell:disabled /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{TemplateBinding Background}" />
+            <Setter Property="Foreground" Value="{TemplateBinding Foreground}" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="#F8FAFC" BorderBrush="{StaticResource LineBrush}" BorderThickness="1,0,0,0">
+        <StackPanel Margin="14,12">
+            <TextBlock Text="🎮 Крестики-нолики" FontSize="15" FontWeight="SemiBold" />
+            <TextBlock x:Name="PlayersText" Margin="0,2,0,0" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+            <TextBlock x:Name="StatusText" Margin="0,10" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap" />
+
+            <UniformGrid x:Name="Board" Rows="3" Columns="3" Width="216" Height="216" />
+
+            <StackPanel x:Name="InviteButtons" Orientation="Horizontal" HorizontalAlignment="Center"
+                        Margin="0,12,0,0" Spacing="8" IsVisible="False">
+                <Button Content="Отклонить" Padding="12,5" FontSize="13" Classes="flat"
+                        Background="#E5E7EB" Foreground="#111827" Click="Decline_Click" />
+                <Button Content="Принять" Padding="16,5" FontSize="13" FontWeight="SemiBold" Classes="flat"
+                        Background="#16A34A" Click="Accept_Click" />
+            </StackPanel>
+
+            <Button x:Name="ActionButton" Margin="0,12,0,0" Padding="12,5" FontSize="13"
+                    HorizontalAlignment="Center" Click="Action_Click" />
+        </StackPanel>
+    </Border>
+</UserControl>

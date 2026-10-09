@@ -11,6 +11,8 @@
     <!-- Позволяет собирать проект не только на Windows (например, в CI) -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyTitle>Office Chat</AssemblyTitle>
+    <!-- Linux-версия (Avalonia) лежит в своей папке и собирается отдельно -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);OfficeChat.Linux/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

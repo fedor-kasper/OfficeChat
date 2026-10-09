@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OfficeChat</RootNamespace>
+    <AssemblyName>officechat</AssemblyName>
+    <AssemblyTitle>Office Chat</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <!-- Общий с Windows-версией код: сеть, история, игра, изображения, лог.
+       Файлы не копируются — подключаются из корня репозитория. -->
+  <ItemGroup>
+    <Compile Include="..\Models\*.cs" Link="Shared\Models\%(Filename)%(Extension)" />
+    <Compile Include="..\Services\*.cs"
+             Exclude="..\Services\AutoStartService.cs;..\Services\FirewallService.cs"
+             Link="Shared\Services\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+</Project>

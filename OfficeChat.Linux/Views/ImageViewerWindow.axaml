@@ -1,0 +1,26 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.ImageViewerWindow"
+        Title="Изображение"
+        Width="1000" Height="720" MinWidth="420" MinHeight="320"
+        WindowStartupLocation="CenterOwner"
+        Background="#101418">
+    <DockPanel>
+        <Border DockPanel.Dock="Bottom" Background="#000000" Padding="14,10">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+                    <Button Content="Сохранить как…" Classes="flat" Padding="14,6" Click="Save_Click" />
+                    <Button Content="Копировать" Classes="flat" Background="#374151" Padding="14,6" Click="Copy_Click" />
+                    <Button Content="Открыть в программе" Classes="flat" Background="#374151" Padding="14,6" Click="OpenExternal_Click" />
+                </StackPanel>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" Foreground="White" FontSize="14" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="InfoText" Foreground="#9CA3AF" FontSize="11" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+        <TextBlock x:Name="CaptionText" DockPanel.Dock="Bottom" Margin="20,8" Foreground="White" FontSize="14"
+                   TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" />
+        <Image x:Name="Picture" Margin="16" Stretch="Uniform" StretchDirection="DownOnly" />
+    </DockPanel>
+</Window>

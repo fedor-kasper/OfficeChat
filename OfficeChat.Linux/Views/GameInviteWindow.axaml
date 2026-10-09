@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.GameInviteWindow"
+        Title="OfficeChat — приглашение в игру"
+        Width="420" SizeToContent="Height"
+        SystemDecorations="None" CanResize="False" Topmost="True"
+        ShowInTaskbar="False" ShowActivated="False"
+        Background="White">
+    <Border BorderBrush="#2563EB" BorderThickness="2">
+        <StackPanel>
+            <Border Background="{StaticResource HeaderBrush}" Padding="14,10">
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="40" Height="40" CornerRadius="20" Background="White"
+                            Margin="0,0,12,0" VerticalAlignment="Center">
+                        <TextBlock Text="🎮" FontSize="20" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="SenderText" FontSize="17" FontWeight="SemiBold" Foreground="White"
+                                   TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="приглашение в игру" FontSize="11" Foreground="#DBEAFE" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <TextBlock Margin="16,14,16,0" FontSize="15" TextWrapping="Wrap" Foreground="#111827"
+                       Text="Предлагает сыграть в крестики-нолики. Вы будете играть ноликами (○), соперник ходит первым." />
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="16,14" Spacing="8">
+                <Button Content="Отклонить" Padding="16,6" FontSize="14" Classes="flat"
+                        Background="#E5E7EB" Foreground="#111827" Click="Decline_Click" />
+                <Button Content="Принять" Padding="20,6" FontSize="14" FontWeight="SemiBold" Classes="flat"
+                        Background="#16A34A" Click="Accept_Click" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

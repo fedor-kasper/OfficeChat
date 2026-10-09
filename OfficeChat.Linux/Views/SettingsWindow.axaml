@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.SettingsWindow"
+        Title="OfficeChat — настройки"
+        Width="420" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterScreen">
+    <StackPanel Margin="20" Spacing="4">
+        <TextBlock Text="Как вас показывать коллегам?" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock Margin="0,0,0,10" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
+                   Text="Это имя увидят другие компьютеры в списке. Его можно поменять позже." />
+        <TextBox x:Name="NameBox" FontSize="14" MaxLength="40" />
+        <CheckBox x:Name="AutoStartBox" Margin="0,14,0,0" Content="Запускать при входе в систему (сразу в трей)" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0" Spacing="8">
+            <Button x:Name="OkButton" Content="Сохранить" MinWidth="100" IsDefault="True"
+                    HorizontalContentAlignment="Center" Click="Ok_Click" />
+            <Button Content="Отмена" MinWidth="90" IsCancel="True" HorizontalContentAlignment="Center"
+                    Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>
