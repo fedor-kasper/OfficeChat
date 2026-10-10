@@ -60,6 +60,8 @@
                                     <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
                                            MaxWidth="320" MaxHeight="180" Stretch="Uniform" StretchDirection="DownOnly"
                                            HorizontalAlignment="Left" Margin="0,2,0,4" IsVisible="{Binding IsImage}" />
+                                    <TextBlock Text="{Binding SenderName}" FontSize="12" FontWeight="SemiBold"
+                                               Foreground="{StaticResource AccentBrush}" IsVisible="{Binding ShowSender}" />
                                     <TextBlock Text="{Binding PreviewText}" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
                                     <DockPanel Margin="0,2,0,0">
                                         <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="8,0,0,0"

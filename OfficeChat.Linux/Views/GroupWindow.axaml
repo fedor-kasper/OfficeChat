@@ -1,0 +1,24 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.GroupWindow"
+        Title="OfficeChat — группа"
+        Width="420" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="20" Spacing="4">
+        <TextBlock x:Name="HeaderText" FontSize="16" FontWeight="SemiBold" />
+        <TextBlock Text="Название" Margin="0,10,0,2" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <TextBox x:Name="NameBox" FontSize="14" MaxLength="60" />
+        <TextBlock x:Name="MembersLabel" Margin="0,12,0,2" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <Border BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" MaxHeight="300">
+            <ScrollViewer>
+                <StackPanel x:Name="PeopleList" Margin="10,6" Spacing="2" />
+            </ScrollViewer>
+        </Border>
+        <TextBlock x:Name="HintText" Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedTextBrush}" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
+            <Button x:Name="OkButton" MinWidth="100" IsDefault="True" HorizontalContentAlignment="Center" Click="Ok_Click" />
+            <Button Content="Отмена" MinWidth="90" IsCancel="True" HorizontalContentAlignment="Center" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

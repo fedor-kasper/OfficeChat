@@ -250,7 +250,12 @@ public partial class MainWindow : Window
             ChatStatusText.Text = _current.TypingText;
             return;
         }
-        if (_current.IsEveryone)
+        if (_current.Group is { } group)
+        {
+            var others = group.Members.Where(m => m.Id != _chat.MyId).Select(m => m.Name);
+            ChatStatusText.Text = $"{group.StatusText} · {string.Join(", ", others.Prepend("вы"))}";
+        }
+        else if (_current.IsEveryone)
         {
             var count = _chat.OnlineCount;
             ChatStatusText.Text = count == 0
@@ -747,11 +752,63 @@ public partial class MainWindow : Window
         if (_current != null) await ConfirmRemove(_current);
     }
 
+    // ---- Группы ----
+
+    private async void CreateGroup_Click(object? sender, RoutedEventArgs e)
+    {
+        var dialog = new GroupWindow(null, _chat.People, _chat.IsPeerOnline, _chat.MyId);
+        await dialog.ShowDialog(this);
+        if (!dialog.Saved) return;
+        OpenConversation(_chat.CreateGroup(dialog.EnteredName, dialog.SelectedPeople));
+    }
+
+    private async void GroupMembers_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_current is { IsGroup: true } contact) await EditGroup(contact);
+    }
+
+    private async Task EditGroup(Contact contact)
+    {
+        var dialog = new GroupWindow(contact.Group, _chat.People, _chat.IsPeerOnline, _chat.MyId);
+        await dialog.ShowDialog(this);
+        if (!dialog.Saved) return;
+        _chat.RenameGroup(contact, dialog.EnteredName);
+        _chat.AddGroupMembers(contact, dialog.SelectedPeople);
+    }
+
+    private async void LeaveGroup_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_current is { IsGroup: true } contact) await ConfirmLeave(contact);
+    }
+
+    private async Task ConfirmLeave(Contact contact)
+    {
+        var text = $"Выйти из группы «{contact.Title}»?\n\nПереписка группы удалится с этого компьютера. " +
+                   "Вернуться можно, если кто-то из участников добавит вас снова.";
+        if (await Dialogs.Confirm(this, text, "Выход из группы"))
+            _chat.LeaveGroup(contact);
+    }
+
     private void ContactsList_ContextRequested(object? sender, ContextRequestedEventArgs e)
     {
         var contact = (e.Source as Control)?.DataContext as Contact;
         if (contact == null || contact.IsEveryone)
         {
+            e.Handled = true;
+            return;
+        }
+        if (contact.IsGroup)
+        {
+            var members = new MenuItem { Header = "Участники…" };
+            members.Click += async (_, _) => await EditGroup(contact);
+            var groupMute = new MenuItem { Header = contact.IsMuted ? "Включить уведомления" : "Выключить уведомления" };
+            groupMute.Click += (_, _) => _chat.SetMuted(contact, !contact.IsMuted);
+            var groupClear = new MenuItem { Header = "Очистить переписку", IsEnabled = contact.Messages.Count > 0 };
+            groupClear.Click += async (_, _) => await ConfirmClear(contact);
+            var leave = new MenuItem { Header = "Выйти из группы" };
+            leave.Click += async (_, _) => await ConfirmLeave(contact);
+            new ContextMenu { ItemsSource = new Control[] { members, groupMute, new Separator(), groupClear, leave } }
+                .Open(ContactsList);
             e.Handled = true;
             return;
         }
@@ -771,9 +828,11 @@ public partial class MainWindow : Window
     private async Task ConfirmClear(Contact contact)
     {
         var hasQueued = contact.Messages.Any(m => m.CanCancel);
-        var text = $"Удалить всю переписку с «{contact.Title}» на этом компьютере?" +
+        var text = (contact.IsGroup
+                       ? $"Удалить всю переписку группы «{contact.Title}» на этом компьютере?"
+                       : $"Удалить всю переписку с «{contact.Title}» на этом компьютере?") +
                    (hasQueued ? "\n\nНеотправленные сообщения тоже будут отменены." : "") +
-                   "\n\nУ собеседника переписка останется.";
+                   (contact.IsGroup ? "\n\nУ остальных участников переписка останется." : "\n\nУ собеседника переписка останется.");
         if (await Dialogs.Confirm(this, text, "Очистить переписку"))
             _chat.ClearConversation(contact);
     }

@@ -23,6 +23,11 @@
         <Style Selector="Border.bubble.queued">
             <Setter Property="Background" Value="#FFF1D6" />
         </Style>
+        <!-- Событие группы («создал группу», «вышел»): по центру, неброско -->
+        <Style Selector="Border.bubble.service">
+            <Setter Property="Background" Value="#F3F4F6" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
         <Style Selector="Border.bubble.game">
             <Setter Property="Background" Value="#F3E8FF" />
             <Setter Property="BorderBrush" Value="#D8B4FE" />
@@ -62,6 +67,17 @@
             <Setter Property="Cursor" Value="Hand" />
         </Style>
 
+        <!-- Точка в списке: в сети — зелёная, нет — серая, группа и «Все» — синяя -->
+        <Style Selector="Ellipse.dot">
+            <Setter Property="Fill" Value="{StaticResource OnlineBrush}" />
+        </Style>
+        <Style Selector="Ellipse.dot.offline">
+            <Setter Property="Fill" Value="#C4C8CF" />
+        </Style>
+        <Style Selector="Ellipse.dot.special">
+            <Setter Property="Fill" Value="{StaticResource AccentBrush}" />
+        </Style>
+
         <Style Selector="ListBoxItem">
             <Setter Property="Padding" Value="8,4" />
         </Style>
@@ -82,8 +98,12 @@
                 </DockPanel>
             </Border>
 
-            <TextBlock DockPanel.Dock="Top" x:Name="OnlineCountText" Margin="14,10,14,4"
-                       FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+            <DockPanel DockPanel.Dock="Top" Margin="14,8,10,4">
+                <Button DockPanel.Dock="Right" Content="＋ Группа" Padding="8,2" FontSize="12"
+                        ToolTip.Tip="Создать групповой чат" Click="CreateGroup_Click" />
+                <TextBlock x:Name="OnlineCountText" FontSize="11" VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedTextBrush}" />
+            </DockPanel>
 
             <ListBox x:Name="ContactsList" Background="Transparent"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -92,10 +112,8 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <DockPanel Margin="2,4">
-                            <Panel DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,10,0" VerticalAlignment="Center">
-                                <Ellipse Fill="{StaticResource OnlineBrush}" IsVisible="{Binding IsOnline}" />
-                                <Ellipse Fill="#C4C8CF" IsVisible="{Binding !IsOnline}" />
-                            </Panel>
+                            <Ellipse DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,10,0" VerticalAlignment="Center"
+                                     Classes="dot" Classes.offline="{Binding !IsOnline}" Classes.special="{Binding !IsPerson}" />
                             <Border DockPanel.Dock="Right" MinWidth="20" Height="20" CornerRadius="10" Padding="6,0"
                                     VerticalAlignment="Center"
                                     Classes="unread" Classes.muted="{Binding IsMuted}" IsVisible="{Binding HasUnread}">
@@ -131,14 +149,18 @@
             <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6"
-                                IsVisible="{Binding Peer, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                IsVisible="{Binding IsConversation}">
                         <Button Content="🎮 Крестики-нолики" Padding="8,3" FontSize="12"
                                 ToolTip.Tip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
-                                IsVisible="{Binding IsOnline}" />
+                                IsVisible="{Binding CanInviteToGame}" />
+                        <Button Content="👥 Участники" Padding="8,3" FontSize="12" IsVisible="{Binding IsGroup}"
+                                ToolTip.Tip="Состав группы, добавить людей, переименовать" Click="GroupMembers_Click" />
                         <Button x:Name="MuteButton" Padding="6,3" FontSize="12" Click="ToggleMute_Click" />
                         <Button Content="Очистить переписку" Padding="8,3" FontSize="12" Click="ClearConversation_Click" />
                         <Button Content="Удалить из списка" Padding="8,3" FontSize="12" Click="RemoveContact_Click"
                                 IsVisible="{Binding CanRemove}" />
+                        <Button Content="Выйти из группы" Padding="8,3" FontSize="12" Click="LeaveGroup_Click"
+                                IsVisible="{Binding IsGroup}" />
                     </StackPanel>
                     <StackPanel>
                         <TextBlock x:Name="ChatTitleText" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
@@ -233,6 +255,7 @@
                                 <DataTemplate>
                                     <Border Classes="bubble" Classes.outgoing="{Binding IsOutgoing}"
                                             Classes.queued="{Binding CanCancel}" Classes.game="{Binding IsGame}"
+                                            Classes.service="{Binding IsService}"
                                             MaxWidth="460" Margin="0,3" Padding="10,6,10,5" CornerRadius="10">
                                         <Border.ContextMenu>
                                             <ContextMenu>
@@ -248,6 +271,9 @@
                                         <StackPanel>
                                             <TextBlock Text="сообщение всем" FontSize="10" Margin="0,0,0,2"
                                                        Foreground="{StaticResource MutedTextBrush}" IsVisible="{Binding IsBroadcast}" />
+                                            <!-- В группе — кто написал -->
+                                            <TextBlock Text="{Binding SenderName}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,2"
+                                                       Foreground="{StaticResource AccentBrush}" IsVisible="{Binding ShowSender}" />
 
                                             <!-- Цитата: на какое сообщение это ответ; клик — показать оригинал -->
                                             <Border Classes="quote" IsVisible="{Binding HasReply}" ToolTip.Tip="Показать сообщение"
