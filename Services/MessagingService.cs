@@ -325,6 +325,15 @@ public sealed class ChatPacket
     /// <summary>Сборка программы вложением: версия — в <see cref="Text"/>, система — в <see cref="FileName"/>.</summary>
     public const string UpdatePackage = "update-package";
 
+    /// <summary>Напоминание для участника (новое или изменённое автором): данные — JSON в <see cref="Text"/>.</summary>
+    public const string ReminderShare = "reminder";
+
+    /// <summary>Автор удалил напоминание <see cref="TargetId"/>.</summary>
+    public const string ReminderDelete = "reminder-delete";
+
+    /// <summary>Отправитель выполнил напоминание <see cref="TargetId"/> («done») или снова открыл («undone»).</summary>
+    public const string ReminderDone = "reminder-done";
+
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
@@ -365,6 +374,9 @@ public sealed class ChatPacket
     public string Text { get; set; } = "";
     public DateTimeOffset SentAt { get; set; }
     public bool IsBroadcast { get; set; }
+
+    /// <summary>Тихое сообщение — получатель показывает его маленьким уведомлением.</summary>
+    public bool Quiet { get; set; }
 
     public List<Guid>? MessageIds { get; set; }
 

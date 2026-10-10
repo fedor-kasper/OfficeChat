@@ -47,12 +47,30 @@
     </Window.Resources>
 
     <!-- Внешний отступ оставляет место для тени -->
-    <Border Margin="12,8,12,8" CornerRadius="12" Background="White"
-            BorderBrush="#2563EB" BorderThickness="2">
+    <!-- Обычное сообщение — красная рамка; тихое — маленькая полоска (см. CompactView) -->
+    <Border x:Name="Frame" Margin="12,8,12,8" CornerRadius="12" Background="White"
+            BorderBrush="#DC2626" BorderThickness="3">
         <Border.Effect>
             <DropShadowEffect BlurRadius="18" ShadowDepth="3" Opacity="0.35" />
         </Border.Effect>
-        <StackPanel>
+        <Grid>
+        <!-- Тихое сообщение: только имя и начало текста, клик — открыть переписку -->
+        <DockPanel x:Name="CompactView" Visibility="Collapsed">
+            <Button DockPanel.Dock="Right" Content="✕" Width="26" Height="26" Padding="0" FontSize="12" Margin="0,0,6,0"
+                    VerticalAlignment="Center" Background="Transparent" BorderBrush="Transparent" Foreground="#6B7280"
+                    ToolTip="Закрыть" Click="Close_Click" />
+            <DockPanel Margin="10,7,4,7" Cursor="Hand" Background="Transparent" MouseLeftButtonUp="Open_Click"
+                       ToolTip="Тихое сообщение — открыть переписку">
+                <Border DockPanel.Dock="Left" Width="26" Height="26" CornerRadius="13" Background="#E5E7EB"
+                        Margin="0,0,8,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="CompactAvatar" FontSize="12" FontWeight="Bold" Foreground="#4B5563"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock x:Name="CompactText" FontSize="13" Foreground="#374151" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </DockPanel>
+        <StackPanel x:Name="FullView">
             <!-- Яркая шапка: аватар, имя, время, закрыть -->
             <Border Background="{StaticResource HeaderBrush}" CornerRadius="10,10,0,0" Padding="14,10,8,10"
                     Cursor="Hand" MouseLeftButtonUp="Open_Click" ToolTip="Открыть переписку">
@@ -97,5 +115,6 @@
                 </Grid>
             </DockPanel>
         </StackPanel>
+        </Grid>
     </Border>
 </Window>

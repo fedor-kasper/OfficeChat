@@ -37,14 +37,37 @@ public partial class NotificationWindow : Window, IStackedPopup
 
         SenderText.Text = contact.Title;
         AvatarText.Text = contact.Title.Length > 0 ? char.ToUpper(contact.Title[0]).ToString() : "?";
+        CompactAvatar.Text = AvatarText.Text;
+        // Тихое сообщение всплывает маленькой полоской; обычное — полным окном с красной рамкой.
+        SetCompact(message.IsQuiet && !message.IsOutgoing);
         AddMessage(message);
 
         Loaded += (_, _) => BeginAnimation(OpacityProperty, new DoubleAnimation(1, FadeDuration));
     }
 
+    /// <summary>Маленькая полоска (тихие сообщения) или полное окно.</summary>
+    public bool IsCompact { get; private set; }
+
+    private void SetCompact(bool compact)
+    {
+        IsCompact = compact;
+        CompactView.Visibility = compact ? Visibility.Visible : Visibility.Collapsed;
+        FullView.Visibility = compact ? Visibility.Collapsed : Visibility.Visible;
+        Width = compact ? 360 : 440;
+        Frame.BorderThickness = new Thickness(compact ? 1 : 3);
+        Frame.BorderBrush = compact ? System.Windows.Media.Brushes.LightGray : RedBrush;
+        Frame.CornerRadius = new CornerRadius(compact ? 8 : 12);
+    }
+
+    private static readonly System.Windows.Media.Brush RedBrush = GameBoards.Frozen(0xDC, 0x26, 0x26);
+
     /// <summary>Добавляет в ленту входящее сообщение или ваш ответ.</summary>
     public void AddMessage(ChatMessage message)
     {
+        // Пришло обычное сообщение, а окно было маленьким (тихим) — разворачиваем.
+        if (IsCompact && !message.IsOutgoing && !message.IsQuiet) SetCompact(false);
+        var who = message.ShowSender ? $"{message.SenderName}: " : "";
+        CompactText.Text = $"{Contact.Title} · {who}{message.PreviewText.ReplaceLineEndings(" ")}";
         _messages.Add(message);
         if (!message.IsOutgoing)
         {

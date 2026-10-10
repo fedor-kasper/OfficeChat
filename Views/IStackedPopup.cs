@@ -1,12 +1,8 @@
-using OfficeChat.Models;
-
 namespace OfficeChat.Views;
 
-/// <summary>Окно в стопке справа внизу (уведомление о сообщении или приглашение в игру).</summary>
+/// <summary>Окно в стопке справа внизу (уведомление о сообщении, приглашение в игру, напоминание).</summary>
 public interface IStackedPopup
 {
-    Contact Contact { get; }
-
     bool IsClosing { get; }
 
     void FadeOutAndClose();

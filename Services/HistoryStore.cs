@@ -70,6 +70,7 @@ public sealed class HistoryStore : IDisposable
         // Группы: кто автор входящего сообщения.
         AddColumnIfMissing("sender_id", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("sender_name", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("quiet", "INTEGER NOT NULL DEFAULT 0");
 
         Execute("""
             CREATE TABLE IF NOT EXISTS outbox (
@@ -92,6 +93,8 @@ public sealed class HistoryStore : IDisposable
             CREATE INDEX IF NOT EXISTS ix_group_receipts_peer ON group_receipts (peer_id, state);
             -- Группы, из которых мы вышли: их пакеты больше не принимаем.
             CREATE TABLE IF NOT EXISTS left_groups (id TEXT PRIMARY KEY);
+            -- Напоминания: каждое целиком в JSON (полей много, искать по ним не нужно).
+            CREATE TABLE IF NOT EXISTS reminders (id TEXT PRIMARY KEY, data TEXT NOT NULL);
             """);
     }
 
@@ -268,6 +271,35 @@ public sealed class HistoryStore : IDisposable
         return result;
     }
 
+    // ---- Напоминания ----
+
+    public List<string> LoadReminders()
+    {
+        using var cmd = Command("SELECT data FROM reminders");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    public void SaveReminder(Guid id, string json)
+    {
+        using var cmd = Command("""
+            INSERT INTO reminders (id, data) VALUES ($id, $data)
+            ON CONFLICT (id) DO UPDATE SET data = $data
+            """);
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        cmd.Parameters.AddWithValue("$data", json);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteReminder(Guid id)
+    {
+        using var cmd = Command("DELETE FROM reminders WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
     // ---- Сообщения ----
 
     /// <summary>Последние <paramref name="limit"/> сообщений раньше <paramref name="before"/>, по возрастанию времени.</summary>
@@ -315,9 +347,9 @@ public sealed class HistoryStore : IDisposable
         using var cmd = Command("""
             INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind,
                                   file_name, file_path, file_size, reply_to, reply_author, reply_text, edited,
-                                  sender_id, sender_name)
+                                  sender_id, sender_name, quiet)
             VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
-                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName)
+                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName, $quiet)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt,
                                            text = $text, edited = $edited
             """);
@@ -340,6 +372,7 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$edited", message.IsEdited);
         cmd.Parameters.AddWithValue("$senderId", message.SenderId?.ToString() ?? "");
         cmd.Parameters.AddWithValue("$senderName", message.SenderName);
+        cmd.Parameters.AddWithValue("$quiet", message.IsQuiet);
         cmd.ExecuteNonQuery();
     }
 
@@ -460,9 +493,9 @@ public sealed class HistoryStore : IDisposable
 
     private const string MessageColumns =
         "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size, " +
-        "reply_to, reply_author, reply_text, edited, sender_id, sender_name";
+        "reply_to, reply_author, reply_text, edited, sender_id, sender_name, quiet";
 
-    private const int MessageColumnCount = 18;
+    private const int MessageColumnCount = 19;
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -503,6 +536,7 @@ public sealed class HistoryStore : IDisposable
             IsEdited = reader.GetBoolean(15),
             SenderId = senderId.Length > 0 ? Guid.Parse(senderId) : null,
             SenderName = reader.GetString(17),
+            IsQuiet = reader.GetBoolean(18),
         };
     }
 
