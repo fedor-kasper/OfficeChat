@@ -139,16 +139,35 @@ public partial class MainWindow : Window
         }
     }
 
-    // ---- Крестики-нолики ----
+    // ---- Мини-игры ----
 
+    /// <summary>Кнопка «Сыграть» — меню с играми.</summary>
     private void InviteToGame_Click(object sender, RoutedEventArgs e)
     {
-        if (_current is not { IsEveryone: false, IsOnline: true }) return;
-        _games.Invite(_current);
-        GameView.Show(_games.GameFor(_current));
+        if (_current is not { CanInviteToGame: true } || sender is not Button button) return;
+        var menu = new ContextMenu { PlacementTarget = button, Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom };
+        foreach (var kind in new[] { GameKind.TicTacToe, GameKind.Checkers, GameKind.Battleship })
+        {
+            var item = new MenuItem { Header = BoardGame.TitleOf(kind) };
+            item.Click += (_, _) => InviteToGame(kind);
+            menu.Items.Add(item);
+        }
+        menu.IsOpen = true;
     }
 
-    private void OnGameInvite(TicTacToeGame game)
+    private void InviteToGame(GameKind kind)
+    {
+        if (_current is not { CanInviteToGame: true } contact) return;
+        if (_games.ActiveGameWith(contact) != null)
+        {
+            ShowNotice("С этим собеседником уже идёт партия — сначала закончите её.");
+            return;
+        }
+        _games.Invite(contact, kind);
+        GameView.Show(_games.GameFor(contact));
+    }
+
+    private void OnGameInvite(BoardGame game)
     {
         // Переписка с пригласившим открыта на экране — кнопки «Принять / Отклонить» уже видны в панели.
         if (_chat.IsConversationVisible(game.Opponent)) return;
@@ -156,21 +175,21 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Приняли во всплывающем окне — открываем переписку, где идёт игра.</summary>
-    private void AcceptGame(TicTacToeGame game)
+    private void AcceptGame(BoardGame game)
     {
         _games.Accept(game);
         OpenConversation(game.Opponent);
     }
 
     /// <summary>Соперник сходил, а переписка не на экране — напоминаем, что наш ход.</summary>
-    private void OnOpponentMoved(TicTacToeGame game)
+    private void OnOpponentMoved(BoardGame game)
     {
         if (_chat.IsConversationVisible(game.Opponent)) return;
         _notifications.Show(game.Opponent, new ChatMessage
         {
             Id = Guid.NewGuid(),
             IsOutgoing = false,
-            Text = "🎮 Ваш ход в крестики-нолики",
+            Text = game is BattleshipGame ? "🎮 Морской бой: ваш выстрел" : $"🎮 {game.Title}: ваш ход",
             Timestamp = DateTime.Now,
             Kind = MessageKind.Game,
         });

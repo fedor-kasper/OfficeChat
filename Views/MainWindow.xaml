@@ -252,7 +252,7 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
                                 Visibility="{Binding IsConversation, Converter={StaticResource BoolToVisibility}}">
-                        <Button Content="🎮 Крестики-нолики" Padding="8,2" Margin="0,0,6,0"
+                        <Button Content="🎮 Сыграть ▾" Padding="8,2" Margin="0,0,6,0"
                                 ToolTip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
                                 Visibility="{Binding CanInviteToGame, Converter={StaticResource BoolToVisibility}}" />
                         <Button Content="👥 Участники" Padding="8,2" Margin="0,0,6,0"

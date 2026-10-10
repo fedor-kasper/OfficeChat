@@ -322,14 +322,21 @@ public sealed class ChatPacket
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
-    // Крестики-нолики: все пакеты относятся к партии <see cref="GameId"/>.
+    // Мини-игры: все пакеты относятся к партии <see cref="GameId"/>; вид игры — в приглашении (<see cref="GameKind"/>).
     public const string GameInvite = "game-invite";
     public const string GameAccept = "game-accept";
     public const string GameDecline = "game-decline";
     /// <summary>Пригласивший передумал до ответа.</summary>
     public const string GameCancel = "game-cancel";
-    /// <summary>Ход: клетка <see cref="Cell"/>, номер хода <see cref="MoveNumber"/>.</summary>
+    /// <summary>
+    /// Ход номер <see cref="MoveNumber"/>: в крестиках-ноликах — клетка <see cref="Cell"/>, в шашках — путь
+    /// шашки <see cref="Cells"/>, в морском бое — выстрел по клетке <see cref="Cell"/>.
+    /// </summary>
     public const string GameMove = "game-move";
+    /// <summary>Морской бой: флот расставлен.</summary>
+    public const string GameReady = "game-ready";
+    /// <summary>Морской бой: ответ на выстрел <see cref="MoveNumber"/> — <see cref="ShotResult"/>, клетки потопленного корабля в <see cref="Cells"/>.</summary>
+    public const string GameShotResult = "game-result";
     public const string GameResign = "game-resign";
 
     /// <summary>Изображение: имя <see cref="FileName"/>, байты — вложением, подпись — в <see cref="Text"/>.</summary>
@@ -411,6 +418,9 @@ public sealed class ChatPacket
     public string? ReceivedPayloadPath { get; set; }
 
     public Guid GameId { get; set; }
+    public string GameKind { get; set; } = "";
     public int Cell { get; set; }
     public int MoveNumber { get; set; }
+    public List<int>? Cells { get; set; }
+    public int ShotResult { get; set; }
 }
