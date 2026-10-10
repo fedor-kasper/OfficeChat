@@ -302,6 +302,12 @@ public sealed class ChatPacket
     /// <summary>Отправитель набирает сообщение (показываем «печатает…» несколько секунд).</summary>
     public const string Typing = "typing";
 
+    /// <summary>Отправитель изменил своё сообщение <see cref="TargetId"/>: новый текст — в <see cref="Text"/>.</summary>
+    public const string Edit = "edit";
+
+    /// <summary>Отправитель удалил своё сообщение <see cref="TargetId"/> у всех.</summary>
+    public const string Delete = "delete";
+
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
@@ -337,6 +343,14 @@ public sealed class ChatPacket
     public bool IsBroadcast { get; set; }
 
     public List<Guid>? MessageIds { get; set; }
+
+    /// <summary>Ответ на сообщение: его Id, автор и начало текста (чтобы показать цитату, даже если оригинала нет).</summary>
+    public Guid? ReplyToId { get; set; }
+    public string ReplyAuthor { get; set; } = "";
+    public string ReplyText { get; set; } = "";
+
+    /// <summary>Сообщение, к которому относится правка или удаление.</summary>
+    public Guid TargetId { get; set; }
 
     public string FileName { get; set; } = "";
 

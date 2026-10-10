@@ -80,6 +80,13 @@ public sealed class NotificationManager
 
     private IEnumerable<IStackedPopup> Popups => _windows.Cast<IStackedPopup>();
 
+    /// <summary>Сообщение удалили — убираем его из всплывающих окон.</summary>
+    public void Remove(ChatMessage message)
+    {
+        foreach (var window in Popups.OfType<NotificationWindow>().ToList())
+            window.RemoveMessage(message);
+    }
+
     /// <summary>Закрывает окна о переписке, которую открыли в главном окне.</summary>
     public void CloseFor(Contact contact)
     {

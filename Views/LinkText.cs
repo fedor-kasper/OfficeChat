@@ -8,7 +8,7 @@ namespace OfficeChat.Views;
 /// <summary>
 /// Текст сообщения с кликабельными ссылками для TextBlock:
 /// &lt;TextBlock local:LinkText.Source="{Binding Text}" /&gt;.
-/// У ссылки — своё меню (открыть, копировать), у всего текста — «Копировать текст».
+/// У ссылки — своё меню (открыть, копировать); у остального текста — меню сообщения (там есть «Копировать текст»).
 /// </summary>
 public static class LinkText
 {
@@ -46,9 +46,6 @@ public static class LinkText
                 ("Копировать ссылку", () => CopyText(segment.Text)));
             block.Inlines.Add(hyperlink);
         }
-
-        // Такой текст нельзя выделить мышью, поэтому даём скопировать его целиком.
-        block.ContextMenu = Menu(("Копировать текст", () => CopyText(text)));
     }
 
     private static readonly System.Windows.Media.Brush LinkBrush = CreateLinkBrush();
