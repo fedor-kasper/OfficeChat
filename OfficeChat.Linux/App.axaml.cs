@@ -78,7 +78,8 @@ public partial class App : Application
 
             Log.Info("Создаём главное окно");
             _mainWindow = new MainWindow(settings);
-            desktop.MainWindow = _mainWindow;
+            // desktop.MainWindow не задаём: если назначить его до запуска цикла событий, Avalonia сама покажет
+            // окно — и автозапуск «сразу в трей» открывал бы его. Программа и так живёт до явного выхода.
             // При автозапуске окно не показываем — программа сразу работает в трее.
             if (!args.Contains(DesktopIntegration.TrayArgument))
                 _mainWindow.Show();

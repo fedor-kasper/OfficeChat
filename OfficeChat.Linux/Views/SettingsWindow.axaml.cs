@@ -29,6 +29,15 @@ public partial class SettingsWindow : Window
         };
     }
 
+    /// <summary>Номер версии внизу окна (и обновляется ли программа по сети).</summary>
+    public void ShowVersion(Version version, bool signed)
+    {
+        VersionText.Text = $"OfficeChat {version}" + (signed
+            ? " · обновляется сам, когда у коллег появляется новая версия"
+            : " · сборка без подписи, обновление по сети выключено");
+        VersionText.IsVisible = true;
+    }
+
     private void Ok_Click(object? sender, RoutedEventArgs e)
     {
         if (EnteredName.Length == 0) return;

@@ -10,6 +10,8 @@
                    Text="Это имя увидят другие компьютеры в списке. Его можно поменять позже." />
         <TextBox x:Name="NameBox" FontSize="14" MaxLength="40" />
         <CheckBox x:Name="AutoStartBox" Margin="0,14,0,0" Content="Запускать при входе в систему (сразу в трей)" />
+        <TextBlock x:Name="VersionText" Margin="0,12,0,0" FontSize="11" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedTextBrush}" IsVisible="False" />
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0" Spacing="8">
             <Button x:Name="OkButton" Content="Сохранить" MinWidth="100" IsDefault="True"
                     HorizontalContentAlignment="Center" Click="Ok_Click" />

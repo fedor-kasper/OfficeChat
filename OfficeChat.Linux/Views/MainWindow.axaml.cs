@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly ChatService _chat;
     private readonly NotificationManager _notifications;
     private readonly GameService _games;
+    private readonly UpdateService _updates;
     private readonly Tray _tray;
     private Contact? _current;
     // Изображения, выбранные для отправки (полоса над полем ввода).
@@ -97,6 +98,11 @@ public partial class MainWindow : Window
         ChatPanel.AddHandler(DragDrop.DropEvent, ChatPanel_Drop);
 
         _chat.Start();
+
+        // Обновление ставится, только когда окно свёрнуто в трей и ничего не прервётся.
+        _updates = new UpdateService(_chat,
+            () => !IsVisible && !_games.HasActiveGames && !_chat.HasTransfersInProgress,
+            ExitApplication);
 
         Activated += (_, _) =>
         {
@@ -725,6 +731,7 @@ public partial class MainWindow : Window
     private async void Settings_Click(object? sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(_settings.DisplayName, _settings.AutoStart);
+        dialog.ShowVersion(_updates.CurrentVersion, _updates.CanShare);
         await dialog.ShowDialog(this);
         if (!dialog.Saved) return;
 
@@ -868,6 +875,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _updates.Dispose();
         _games.LeaveAll();
         _games.Dispose();
         _notifications.CloseAll();

@@ -1,5 +1,6 @@
 using Avalonia;
 using OfficeChat.Platform;
+using OfficeChat.Services;
 
 namespace OfficeChat;
 
@@ -11,6 +12,9 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        // Перезапуск после обновления: ждём, пока закроется старая копия.
+        UpdateService.FinishRestart(args);
+
         // Проверяем до запуска Avalonia: если программа уже работает (например, свёрнута в трей),
         // просим её показать окно и тихо выходим.
         Instance = new SingleInstance();

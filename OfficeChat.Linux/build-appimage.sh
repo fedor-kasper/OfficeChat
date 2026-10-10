@@ -7,7 +7,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' OfficeChat.Linux.csproj)
+# Версию можно задать снаружи (так делает сборка в GitHub Actions), иначе — из проекта.
+VERSION=${VERSION:-$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' OfficeChat.Linux.csproj)}
 DIST=dist
 APPDIR=$DIST/OfficeChat.AppDir
 TOOLS=$DIST/tools
@@ -17,7 +18,7 @@ echo "==> Публикация (self-contained, linux-x64)"
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/lib/officechat"
 AVALONIA_TELEMETRY_OPTOUT=1 dotnet publish OfficeChat.Linux.csproj -c Release -r linux-x64 --self-contained true \
-    -p:PublishSingleFile=false -p:DebugType=none -o "$APPDIR/usr/lib/officechat" --nologo
+    -p:PublishSingleFile=false -p:DebugType=none -p:Version="$VERSION" -o "$APPDIR/usr/lib/officechat" --nologo
 
 echo "==> Сборка AppDir"
 cp Assets/officechat.png "$APPDIR/officechat.png"
