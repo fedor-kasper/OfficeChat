@@ -9,6 +9,7 @@ using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using OfficeChat.Models;
 using OfficeChat.Platform;
 using OfficeChat.Services;
@@ -26,6 +27,13 @@ public partial class MainWindow : Window
     // Изображения, выбранные для отправки (полоса над полем ввода).
     private readonly ObservableCollection<PendingAttachment> _attachments = new();
     private bool _exiting;
+    // Сообщение, на которое отвечаем, и сообщение, которое редактируем (не больше одного из двух).
+    private ChatMessage? _replyTo;
+    private ChatMessage? _editing;
+    // Что было в поле ввода до начала редактирования — вернём после.
+    private string _draftBeforeEdit = "";
+    // Текст в поле ввода меняет сама программа (начало и конец редактирования) — это не набор текста.
+    private bool _settingInput;
 
     public MainWindow() : this(new AppSettings { DisplayName = "Дизайнер" }) { }
 
@@ -47,6 +55,11 @@ public partial class MainWindow : Window
         ContactsList.ItemsSource = _chat.Contacts;
 
         _notifications = new NotificationManager(_chat, OpenConversation);
+        _chat.MessageRemoved += (_, message) =>
+        {
+            _notifications.Remove(message);
+            if (message == _replyTo || message == _editing) CancelCompose();
+        };
 
         _games = new GameService(_chat);
         _games.InviteReceived += OnGameInvite;
@@ -75,7 +88,7 @@ public partial class MainWindow : Window
         // Набирают текст — сообщаем собеседнику «печатает…» (но не когда поле очистилось после отправки).
         InputBox.TextChanged += (_, _) =>
         {
-            if (_current != null && !string.IsNullOrEmpty(InputBox.Text) && InputBox.IsKeyboardFocusWithin)
+            if (_current != null && !_settingInput && !string.IsNullOrEmpty(InputBox.Text) && InputBox.IsKeyboardFocusWithin)
                 _chat.NotifyTyping(_current);
         };
 
@@ -176,6 +189,7 @@ public partial class MainWindow : Window
             _current.PropertyChanged -= OnCurrentContactChanged;
         }
 
+        CancelCompose();
         _current = ContactsList.SelectedItem as Contact;
         NoticeText.IsVisible = false;
         // Прикреплённое к одной переписке не должно случайно уйти в другую.
@@ -285,6 +299,18 @@ public partial class MainWindow : Window
             e.Handled = true;
             SendCurrent();
         }
+        else if (e.Key == Key.Escape && ComposeBar.IsVisible)
+        {
+            e.Handled = true;
+            CancelCompose();
+        }
+        else if (e.Key == Key.Up && e.KeyModifiers == KeyModifiers.None && string.IsNullOrEmpty(InputBox.Text) &&
+                 _editing == null && _current?.Messages.LastOrDefault(m => m.CanEdit) is { } last)
+        {
+            // Стрелка вверх в пустом поле — исправить своё последнее сообщение (как в Telegram).
+            e.Handled = true;
+            StartEdit(last);
+        }
         else if (e.Key == Key.V && e.KeyModifiers == KeyModifiers.Control)
         {
             // Буфер обмена в Avalonia читается асинхронно — решаем сами, вставлять текст или прикреплять картинку.
@@ -299,7 +325,16 @@ public partial class MainWindow : Window
     {
         var text = InputBox.Text?.Trim() ?? "";
         var contact = _current;
+        if (contact != null && _editing != null)
+        {
+            FinishEdit(contact, text);
+            return;
+        }
         if (contact == null || (text.Length == 0 && _attachments.Count == 0)) return;
+
+        // Ответ привязываем к первому, что уходит: к тексту или к первому вложению.
+        var replyTo = _replyTo;
+        CancelCompose();
 
         int recipients;
         if (_attachments.Count > 0)
@@ -313,14 +348,14 @@ public partial class MainWindow : Window
             foreach (var item in items)
             {
                 if (item.IsImage)
-                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption);
+                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption, replyTo);
                 else
                 {
                     // Большой файл сначала копируется в хранилище программы — это может занять время.
                     if (item.Size > 50 * 1024 * 1024) ShowNotice($"Подготовка «{item.FileName}» к отправке…");
                     try
                     {
-                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption);
+                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption, replyTo);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
@@ -329,13 +364,14 @@ public partial class MainWindow : Window
                         return;
                     }
                 }
+                replyTo = null;
             }
             if (items.Count > 1 && text.Length > 0)
                 _chat.Send(contact, text);
         }
         else
         {
-            recipients = _chat.Send(contact, text);
+            recipients = _chat.Send(contact, text, replyTo);
         }
         if (contact != _current) return;
 
@@ -360,6 +396,127 @@ public partial class MainWindow : Window
 
         InputBox.Text = "";
         InputBox.Focus();
+    }
+
+    // ---- Ответ, правка, удаление ----
+
+    private void StartReply(ChatMessage message)
+    {
+        CancelCompose();
+        _replyTo = message;
+        ComposeTitle.Text = $"↩ Ответ · {(message.IsOutgoing ? ChatService.MyReplyAuthor : _current?.Title)}";
+        ComposeText.Text = message.QuoteText;
+        ComposeBar.IsVisible = true;
+        InputBox.Focus();
+    }
+
+    private void StartEdit(ChatMessage message)
+    {
+        CancelCompose();
+        _editing = message;
+        _draftBeforeEdit = InputBox.Text ?? "";
+        ComposeTitle.Text = message.IsFile || message.IsImage ? "✎ Изменение подписи" : "✎ Редактирование";
+        ComposeText.Text = message.QuoteText;
+        ComposeBar.IsVisible = true;
+        SetInputText(message.Text);
+        InputBox.Focus();
+    }
+
+    /// <summary>Отправка в режиме редактирования — сохранить новый текст.</summary>
+    private void FinishEdit(Contact contact, string text)
+    {
+        var message = _editing!;
+        if (text.Length == 0 && message.Kind == MessageKind.Text)
+        {
+            ShowNotice("Сообщение не может быть пустым. Чтобы убрать его, нажмите на него правой кнопкой → «Удалить».");
+            return;
+        }
+        _chat.Edit(contact, message, text);
+        CancelCompose();
+    }
+
+    /// <summary>Выйти из режима ответа или редактирования (после редактирования вернуть прежний черновик).</summary>
+    private void CancelCompose()
+    {
+        if (_editing != null)
+        {
+            _editing = null;
+            SetInputText(_draftBeforeEdit);
+            _draftBeforeEdit = "";
+        }
+        _replyTo = null;
+        ComposeBar.IsVisible = false;
+    }
+
+    private void SetInputText(string text)
+    {
+        _settingInput = true;
+        InputBox.Text = text;
+        InputBox.CaretIndex = text.Length;
+        _settingInput = false;
+    }
+
+    private void CancelCompose_Click(object? sender, RoutedEventArgs e)
+    {
+        CancelCompose();
+        InputBox.Focus();
+    }
+
+    private void ReplyMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { CanReply: true } message) StartReply(message);
+    }
+
+    private void EditMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is { CanEdit: true } message) StartEdit(message);
+    }
+
+    private async void CopyMessage_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is not { } message || Clipboard == null) return;
+        // Если в сообщении выделен кусок текста — копируем его, иначе весь текст.
+        var bubble = ((sender as MenuItem)?.Parent as ContextMenu)?.PlacementTarget;
+        var selected = bubble?.GetVisualDescendants().OfType<SelectableTextBlock>()
+            .Select(t => t.SelectedText).FirstOrDefault(t => !string.IsNullOrEmpty(t));
+        await Clipboard.SetTextAsync(selected ?? message.Text);
+    }
+
+    private async void DeleteForMe_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is not { } message || _current is not { } contact) return;
+        var text = message.IsOutgoing && message.Status != MessageStatus.Queued
+            ? "Удалить сообщение только у себя? У собеседника оно останется."
+            : "Удалить сообщение?";
+        if (await Dialogs.Confirm(this, text, "Удаление"))
+            _chat.Delete(contact, message, forEveryone: false);
+    }
+
+    private async void DeleteForAll_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is not { CanDeleteForEveryone: true } message || _current is not { } contact) return;
+        var text = message.Status == MessageStatus.Queued
+            ? "Сообщение ещё не отправлено — отменить его?"
+            : "Удалить сообщение и у вас, и у собеседника?" +
+              (contact.IsOnline ? "" : "\n\nСобеседник не в сети — у него сообщение исчезнет, когда он появится.");
+        if (await Dialogs.Confirm(this, text, "Удаление"))
+            _chat.Delete(contact, message, forEveryone: true);
+    }
+
+    /// <summary>Клик по цитате — прокрутить к сообщению, на которое ответили.</summary>
+    private void Quote_PointerReleased(object? sender, PointerReleasedEventArgs e)
+    {
+        if (e.InitialPressMouseButton != MouseButton.Left || MessageOf(sender) is not { ReplyToId: { } id }) return;
+        e.Handled = true;
+        var original = _current?.Messages.FirstOrDefault(m => m.Id == id);
+        if (original == null)
+        {
+            ShowNotice(_current?.HasOlderMessages == true
+                ? "Это сообщение выше — нажмите «Показать более ранние сообщения»."
+                : "Исходное сообщение удалено.");
+            return;
+        }
+        MessagesList.ContainerFromItem(original)?.BringIntoView();
     }
 
     private void CancelMessage_Click(object? sender, RoutedEventArgs e)

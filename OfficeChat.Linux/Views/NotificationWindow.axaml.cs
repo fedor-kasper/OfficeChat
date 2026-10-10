@@ -53,6 +53,17 @@ public partial class NotificationWindow : Window, IStackedPopup
         Dispatcher.UIThread.Post(() => MessagesScroll.ScrollToEnd(), DispatcherPriority.Background);
     }
 
+    /// <summary>Сообщение удалили — убираем его; если входящих не осталось, закрываем окно.</summary>
+    public void RemoveMessage(ChatMessage message)
+    {
+        if (!_messages.Remove(message) || message.IsOutgoing) return;
+        _incomingCount--;
+        if (_incomingCount <= 0)
+            FadeOutAndClose();
+        else
+            CountText.Text = _incomingCount > 1 ? $"{_incomingCount} сообщ." : _messages.Last(m => !m.IsOutgoing).TimeText;
+    }
+
     public void FadeOutAndClose()
     {
         if (IsClosing) return;

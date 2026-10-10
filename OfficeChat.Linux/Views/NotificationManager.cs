@@ -82,6 +82,13 @@ public sealed class NotificationManager
         Layout();
     }
 
+    /// <summary>Сообщение удалили — убираем его из всплывающих окон.</summary>
+    public void Remove(ChatMessage message)
+    {
+        foreach (var window in _windows.OfType<NotificationWindow>().ToList())
+            window.RemoveMessage(message);
+    }
+
     public void CloseFor(Contact contact)
     {
         foreach (var window in _windows.OfType<NotificationWindow>().Where(w => w.Contact == contact).ToList())

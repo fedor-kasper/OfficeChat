@@ -27,6 +27,12 @@ public class LinkTextBlock : SelectableTextBlock
     /// <summary>Внешний вид и поведение — как у обычного SelectableTextBlock.</summary>
     protected override Type StyleKeyOverride => typeof(SelectableTextBlock);
 
+    public LinkTextBlock()
+    {
+        // Своё меню «Copy» (по-английски) не нужно: правый клик открывает меню сообщения, где есть «Копировать текст».
+        ContextFlyout = null;
+    }
+
     public string? LinkedText
     {
         get => GetValue(LinkedTextProperty);
