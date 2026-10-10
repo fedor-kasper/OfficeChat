@@ -4,12 +4,12 @@ using OfficeChat.Models;
 
 namespace OfficeChat.Views;
 
-/// <summary>Всплывающее приглашение в крестики-нолики. Висит, пока не ответят (или пригласивший не передумает).</summary>
+/// <summary>Всплывающее приглашение в игру. Висит, пока не ответят (или пригласивший не передумает).</summary>
 public partial class GameInviteWindow : Window, IStackedPopup
 {
     private static readonly Duration FadeDuration = new(TimeSpan.FromMilliseconds(200));
 
-    public TicTacToeGame Game { get; }
+    public BoardGame Game { get; }
 
     public Contact Contact => Game.Opponent;
 
@@ -18,11 +18,12 @@ public partial class GameInviteWindow : Window, IStackedPopup
     public event Action<GameInviteWindow>? Accepted;
     public event Action<GameInviteWindow>? Declined;
 
-    public GameInviteWindow(TicTacToeGame game)
+    public GameInviteWindow(BoardGame game)
     {
         InitializeComponent();
         Game = game;
         SenderText.Text = game.Opponent.Title;
+        InviteText.Text = $"Предлагает сыграть: {game.Title.ToLowerInvariant()}. {game.InviteHint}";
 
         // Пригласивший отменил приглашение — убираем окно.
         game.Changed += OnGameChanged;

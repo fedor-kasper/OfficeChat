@@ -1,9 +1,9 @@
 <UserControl x:Class="OfficeChat.Views.GamePanel"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Width="250">
+             MinWidth="250">
     <UserControl.Resources>
-        <!-- Клетка поля: плоская кнопка с подсветкой при наведении -->
+        <!-- Клетка поля крестиков-ноликов: плоская кнопка с подсветкой при наведении -->
         <Style x:Key="CellButton" TargetType="Button">
             <Setter Property="FontSize" Value="34" />
             <Setter Property="FontWeight" Value="Bold" />
@@ -34,28 +34,38 @@
 
     <!-- Панель справа от ленты сообщений -->
     <Border Background="#F8FAFC" BorderBrush="#E2E5EA" BorderThickness="1,0,0,0">
-        <StackPanel Margin="14,12,14,12">
-            <TextBlock Text="🎮 Крестики-нолики" FontSize="15" FontWeight="SemiBold" />
-            <TextBlock x:Name="PlayersText" Margin="0,2,0,0" FontSize="12"
-                       Foreground="{StaticResource MutedTextBrush}" />
-            <TextBlock x:Name="StatusText" Margin="0,10,0,10" FontSize="15" FontWeight="SemiBold"
-                       TextWrapping="Wrap" />
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Margin="14,12,14,12">
+                <TextBlock x:Name="TitleText" FontSize="15" FontWeight="SemiBold" />
+                <TextBlock x:Name="PlayersText" Margin="0,2,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock x:Name="StatusText" Margin="0,10,0,10" FontSize="15" FontWeight="SemiBold"
+                           TextWrapping="Wrap" MaxWidth="300" HorizontalAlignment="Left" />
 
-            <!-- Поле 3×3, кнопки создаются в коде -->
-            <UniformGrid x:Name="Board" Rows="3" Columns="3" Width="216" Height="216" />
+                <!-- Поле игры строится в коде: у каждой игры своё -->
+                <ContentControl x:Name="BoardHost" HorizontalAlignment="Center" />
 
-            <!-- Нас пригласили: принять / отклонить прямо здесь -->
-            <StackPanel x:Name="InviteButtons" Orientation="Horizontal" HorizontalAlignment="Center"
-                        Margin="0,12,0,0" Visibility="Collapsed">
-                <Button Content="Отклонить" Padding="12,5" FontSize="13" Margin="0,0,8,0"
-                        Style="{StaticResource FlatButton}" Background="#E5E7EB" Foreground="#111827"
-                        Click="Decline_Click" />
-                <Button Content="Принять" Padding="16,5" FontSize="13" FontWeight="SemiBold"
-                        Style="{StaticResource FlatButton}" Background="#16A34A" Click="Accept_Click" />
+                <!-- Морской бой: расстановка флота -->
+                <StackPanel x:Name="PlacementButtons" Orientation="Horizontal" HorizontalAlignment="Center"
+                            Margin="0,12,0,0" Visibility="Collapsed">
+                    <Button Content="🔀 Перемешать" Padding="12,5" FontSize="13" Margin="0,0,8,0" Click="Shuffle_Click" />
+                    <Button Content="Готов" Padding="16,5" FontSize="13" FontWeight="SemiBold"
+                            Style="{StaticResource FlatButton}" Background="#16A34A" Click="Ready_Click" />
+                </StackPanel>
+
+                <!-- Нас пригласили: принять / отклонить прямо здесь -->
+                <StackPanel x:Name="InviteButtons" Orientation="Horizontal" HorizontalAlignment="Center"
+                            Margin="0,12,0,0" Visibility="Collapsed">
+                    <Button Content="Отклонить" Padding="12,5" FontSize="13" Margin="0,0,8,0"
+                            Style="{StaticResource FlatButton}" Background="#E5E7EB" Foreground="#111827"
+                            Click="Decline_Click" />
+                    <Button Content="Принять" Padding="16,5" FontSize="13" FontWeight="SemiBold"
+                            Style="{StaticResource FlatButton}" Background="#16A34A" Click="Accept_Click" />
+                </StackPanel>
+
+                <Button x:Name="ActionButton" Margin="0,12,0,0" Padding="12,5" FontSize="13"
+                        HorizontalAlignment="Center" Click="Action_Click" />
             </StackPanel>
-
-            <Button x:Name="ActionButton" Margin="0,12,0,0" Padding="12,5" FontSize="13"
-                    HorizontalAlignment="Center" Click="Action_Click" />
-        </StackPanel>
+        </ScrollViewer>
     </Border>
 </UserControl>

@@ -8,42 +8,27 @@ using OfficeChat.Services;
 namespace OfficeChat.Views;
 
 /// <summary>
-/// Партия в крестики-нолики внутри переписки — панель справа от ленты сообщений.
+/// Партия (крестики-нолики, шашки или морской бой) внутри переписки — панель справа от ленты сообщений.
 /// Видна, пока партия идёт; после окончания показывает итог до нажатия «Закрыть».
 /// </summary>
 public partial class GamePanel : UserControl
 {
-    private static readonly Brush CrossBrush = Frozen(0x25, 0x63, 0xEB);
-    private static readonly Brush NoughtBrush = Frozen(0xE1, 0x1D, 0x48);
-    private static readonly Brush CellBrush = Brushes.White;
-    private static readonly Brush WinBrush = Frozen(0xFE, 0xF0, 0x8A);
-    private static readonly Brush MyTurnBrush = Frozen(0x16, 0xA3, 0x4A);
-    private static readonly Brush NormalBrush = Frozen(0x11, 0x18, 0x27);
+    private static readonly Brush MyTurnBrush = GameBoards.Frozen(0x16, 0xA3, 0x4A);
+    private static readonly Brush NormalBrush = GameBoards.Frozen(0x11, 0x18, 0x27);
 
-    private readonly Button[] _cells = new Button[9];
     private GameService? _games;
-    private TicTacToeGame? _game;
+    private BoardGame? _game;
+    private IGameBoard? _board;
 
     public GamePanel()
     {
         InitializeComponent();
-        for (var i = 0; i < 9; i++)
-        {
-            var cell = i;
-            var button = new Button { Style = (Style)Resources["CellButton"] };
-            button.Click += (_, _) =>
-            {
-                if (_game != null) _games?.Move(_game, cell);
-            };
-            _cells[i] = button;
-            Board.Children.Add(button);
-        }
     }
 
     public void Attach(GameService games) => _games = games;
 
     /// <summary>Показать партию (или скрыть панель, если null).</summary>
-    public void Show(TicTacToeGame? game)
+    public void Show(BoardGame? game)
     {
         if (_game != game)
         {
@@ -53,6 +38,8 @@ public partial class GamePanel : UserControl
                 _game.Opponent.PropertyChanged -= OnOpponentChanged;
             }
             _game = game;
+            _board = game == null || _games == null ? null : GameBoards.Create(game, _games, (Style)Resources["CellButton"]);
+            BoardHost.Content = _board?.View;
             if (_game != null)
             {
                 _game.Changed += Refresh;
@@ -70,21 +57,23 @@ public partial class GamePanel : UserControl
     private void Refresh()
     {
         if (_game is not { } game) return;
-
-        for (var i = 0; i < 9; i++)
-        {
-            var mark = game[i];
-            var button = _cells[i];
-            button.Content = mark == '\0' ? null : mark.ToString();
-            button.Foreground = mark == TicTacToeGame.Cross ? CrossBrush : NoughtBrush;
-            button.IsEnabled = game.CanPlay(i);
-            button.Background = game.WinningLine?.Contains(i) == true ? WinBrush : CellBrush;
-        }
+        _board?.Refresh();
 
         var name = game.Opponent.Title;
-        PlayersText.Text = $"Вы — {game.MyMark}  ·  {name} — {game.OpponentMark}";
+        TitleText.Text = $"🎮 {game.Title}";
+        PlayersText.Text = game switch
+        {
+            BattleshipGame { State: GameState.Playing or GameState.Finished } sea when !sea.IsPlacing =>
+                $"Кораблей на плаву: у вас {sea.MyShipsLeft}, у соперника {sea.EnemyShipsLeft}",
+            CheckersGame checkers =>
+                $"Вы — {game.MySide} · {name} — {game.OpponentSide}\nШашек: у вас {checkers.CountPieces(checkers.IAmWhite)}, " +
+                $"у соперника {checkers.CountPieces(!checkers.IAmWhite)}",
+            _ when game.MySide.Length > 0 => $"Вы — {game.MySide}  ·  {name} — {game.OpponentSide}",
+            _ => $"Соперник — {name}",
+        };
         StatusText.Foreground = NormalBrush;
         InviteButtons.Visibility = Visibility.Collapsed;
+        PlacementButtons.Visibility = Visibility.Collapsed;
         ActionButton.Visibility = Visibility.Visible;
 
         switch (game.State)
@@ -95,19 +84,37 @@ public partial class GamePanel : UserControl
                 break;
 
             case GameState.Invited:
-                StatusText.Text = $"{name} приглашает сыграть. Вы — ноликами, соперник ходит первым.";
+                StatusText.Text = $"{name} приглашает сыграть. {game.InviteHint}";
                 InviteButtons.Visibility = Visibility.Visible;
                 ActionButton.Visibility = Visibility.Collapsed;
                 break;
 
+            case GameState.Playing when game is BattleshipGame { IsPlacing: true } sea:
+                StatusText.Text = !sea.IAmReady
+                    ? "Расставьте корабли: «Перемешать» — другая расстановка, «Готов» — к бою."
+                    : $"Ждём, пока {name} расставит корабли…";
+                PlacementButtons.Visibility = sea.IAmReady ? Visibility.Collapsed : Visibility.Visible;
+                ActionButton.Content = "Сдаться";
+                break;
+
+            case GameState.Playing when game is BattleshipGame { PendingShot: not null }:
+                StatusText.Text = "Выстрел… ждём ответа";
+                ActionButton.Content = "Сдаться";
+                break;
+
             case GameState.Playing when game.IsMyTurn:
-                StatusText.Text = "Ваш ход";
+                StatusText.Text = game switch
+                {
+                    BattleshipGame => "Ваш выстрел — выберите клетку на поле соперника",
+                    CheckersGame { MustCapture: true } => "Ваш ход — нужно бить",
+                    _ => "Ваш ход",
+                };
                 StatusText.Foreground = MyTurnBrush;
                 ActionButton.Content = "Сдаться";
                 break;
 
             case GameState.Playing when game.Opponent.IsOnline:
-                StatusText.Text = $"Ходит {name}…";
+                StatusText.Text = game is BattleshipGame ? $"Стреляет {name}…" : $"Ходит {name}…";
                 ActionButton.Content = "Сдаться";
                 break;
 
@@ -146,6 +153,16 @@ public partial class GamePanel : UserControl
         if (_game != null) _games?.Decline(_game);
     }
 
+    private void Shuffle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_game is BattleshipGame sea) sea.Shuffle();
+    }
+
+    private void Ready_Click(object sender, RoutedEventArgs e)
+    {
+        if (_game is BattleshipGame sea) _games?.Ready(sea);
+    }
+
     private void Action_Click(object sender, RoutedEventArgs e)
     {
         if (_game is not { } game || _games == null) return;
@@ -167,13 +184,13 @@ public partial class GamePanel : UserControl
     /// Уйти из идущей партии: соперник в сети — только сдавшись,
     /// не в сети — можно прервать без результата.
     /// </summary>
-    private void ConfirmLeave(TicTacToeGame game)
+    private void ConfirmLeave(BoardGame game)
     {
         var opponentOnline = game.Opponent.IsOnline;
         var question = opponentOnline
             ? "Сдаться? Победа достанется сопернику."
             : $"{game.Opponent.Title} не в сети. Прервать партию без результата?";
-        if (MessageBox.Show(Window.GetWindow(this)!, question, "Крестики-нолики",
+        if (MessageBox.Show(Window.GetWindow(this)!, question, game.Title,
                 MessageBoxButton.YesNo, MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes)
             return;
 
@@ -181,12 +198,5 @@ public partial class GamePanel : UserControl
             _games!.Resign(game);
         else
             _games!.Abandon(game);
-    }
-
-    private static Brush Frozen(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
     }
 }
