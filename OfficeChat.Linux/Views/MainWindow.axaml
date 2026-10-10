@@ -150,9 +150,16 @@
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Spacing="6"
                                 IsVisible="{Binding IsConversation}">
-                        <Button Content="🎮 Крестики-нолики" Padding="8,3" FontSize="12"
-                                ToolTip.Tip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
-                                IsVisible="{Binding CanInviteToGame}" />
+                        <Button Content="🎮 Сыграть ▾" Padding="8,3" FontSize="12"
+                                ToolTip.Tip="Пригласить собеседника сыграть" IsVisible="{Binding CanInviteToGame}">
+                            <Button.Flyout>
+                                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                                    <MenuItem Header="Крестики-нолики" Tag="TicTacToe" Click="InviteToGame_Click" />
+                                    <MenuItem Header="Шашки" Tag="Checkers" Click="InviteToGame_Click" />
+                                    <MenuItem Header="Морской бой" Tag="Battleship" Click="InviteToGame_Click" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
                         <Button Content="👥 Участники" Padding="8,3" FontSize="12" IsVisible="{Binding IsGroup}"
                                 ToolTip.Tip="Состав группы, добавить людей, переименовать" Click="GroupMembers_Click" />
                         <Button x:Name="MuteButton" Padding="6,3" FontSize="12" Click="ToggleMute_Click" />

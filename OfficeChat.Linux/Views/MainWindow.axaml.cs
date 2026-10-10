@@ -120,35 +120,43 @@ public partial class MainWindow : Window
             _notifications.Show(contact, message);
     }
 
-    // ---- Крестики-нолики ----
+    // ---- Мини-игры ----
 
+    /// <summary>Выбрали игру в меню кнопки «Сыграть».</summary>
     private void InviteToGame_Click(object? sender, RoutedEventArgs e)
     {
-        if (_current is not { IsEveryone: false, IsOnline: true }) return;
-        _games.Invite(_current);
-        GameView.Show(_games.GameFor(_current));
+        if (_current is not { CanInviteToGame: true } contact ||
+            (sender as MenuItem)?.Tag is not string tag || !Enum.TryParse<GameKind>(tag, out var kind))
+            return;
+        if (_games.ActiveGameWith(contact) != null)
+        {
+            ShowNotice("С этим собеседником уже идёт партия — сначала закончите её.");
+            return;
+        }
+        _games.Invite(contact, kind);
+        GameView.Show(_games.GameFor(contact));
     }
 
-    private void OnGameInvite(TicTacToeGame game)
+    private void OnGameInvite(BoardGame game)
     {
         if (_chat.IsConversationVisible(game.Opponent)) return;
         _notifications.ShowGameInvite(game, AcceptGame, _games.Decline);
     }
 
-    private void AcceptGame(TicTacToeGame game)
+    private void AcceptGame(BoardGame game)
     {
         _games.Accept(game);
         OpenConversation(game.Opponent);
     }
 
-    private void OnOpponentMoved(TicTacToeGame game)
+    private void OnOpponentMoved(BoardGame game)
     {
         if (_chat.IsConversationVisible(game.Opponent)) return;
         _notifications.Show(game.Opponent, new ChatMessage
         {
             Id = Guid.NewGuid(),
             IsOutgoing = false,
-            Text = "🎮 Ваш ход в крестики-нолики",
+            Text = game is BattleshipGame ? "🎮 Морской бой: ваш выстрел" : $"🎮 {game.Title}: ваш ход",
             Timestamp = DateTime.Now,
             Kind = MessageKind.Game,
         });

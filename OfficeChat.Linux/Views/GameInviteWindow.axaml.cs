@@ -4,10 +4,10 @@ using OfficeChat.Models;
 
 namespace OfficeChat.Views;
 
-/// <summary>Всплывающее приглашение в крестики-нолики. Висит, пока не ответят (или пригласивший не передумает).</summary>
+/// <summary>Всплывающее приглашение в игру. Висит, пока не ответят (или пригласивший не передумает).</summary>
 public partial class GameInviteWindow : Window, IStackedPopup
 {
-    public TicTacToeGame Game { get; }
+    public BoardGame Game { get; }
 
     public Contact Contact => Game.Opponent;
 
@@ -18,13 +18,14 @@ public partial class GameInviteWindow : Window, IStackedPopup
 
     public GameInviteWindow() : this(null!) { }
 
-    public GameInviteWindow(TicTacToeGame game)
+    public GameInviteWindow(BoardGame game)
     {
         InitializeComponent();
         Game = game;
         if (game == null) return; // конструктор для дизайнера
 
         SenderText.Text = game.Opponent.Title;
+        InviteText.Text = $"Предлагает сыграть: {game.Title.ToLowerInvariant()}. {game.InviteHint}";
         game.Changed += OnGameChanged;
         Closed += (_, _) => game.Changed -= OnGameChanged;
         Popups.SetupFade(this);

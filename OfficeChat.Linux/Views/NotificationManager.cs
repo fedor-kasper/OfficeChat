@@ -47,8 +47,8 @@ public sealed class NotificationManager
         AddToStack(window);
     }
 
-    /// <summary>Приглашение в крестики-нолики с кнопками «Принять / Отклонить».</summary>
-    public void ShowGameInvite(TicTacToeGame game, Action<TicTacToeGame> accept, Action<TicTacToeGame> decline)
+    /// <summary>Приглашение в игру с кнопками «Принять / Отклонить».</summary>
+    public void ShowGameInvite(BoardGame game, Action<BoardGame> accept, Action<BoardGame> decline)
     {
         var window = new GameInviteWindow(game);
         window.Accepted += w => accept(w.Game);
