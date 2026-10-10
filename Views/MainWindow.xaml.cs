@@ -53,7 +53,8 @@ public partial class MainWindow : Window
         _tray = new TrayIcon();
         _tray.OpenRequested += ShowFromTray;
         _tray.ExitRequested += ExitApplication;
-        _chat.UnreadChanged += () => _tray.SetUnread(_chat.TotalUnread);
+        _chat.UnreadChanged += OnUnreadChanged;
+        TaskbarItemInfo = new System.Windows.Shell.TaskbarItemInfo();
 
         AttachmentsList.ItemsSource = _attachments;
         _attachments.CollectionChanged += (_, _) =>
@@ -82,9 +83,19 @@ public partial class MainWindow : Window
 
     private void OnMessageReceived(Contact contact, ChatMessage message)
     {
-        // Если эта переписка уже открыта перед глазами — всплывать незачем.
-        if (!_chat.IsConversationVisible(contact))
+        // Если эта переписка уже открыта перед глазами или уведомления по ней выключены — всплывать незачем.
+        if (!_chat.IsConversationVisible(contact) && !contact.IsMuted)
             _notifications.Show(contact, message);
+    }
+
+    /// <summary>Число непрочитанных — на значке в трее и на кнопке программы в панели задач.</summary>
+    private void OnUnreadChanged()
+    {
+        var unread = _chat.TotalUnread;
+        _tray.SetUnread(unread);
+        TaskbarItemInfo.Overlay = unread > 0 ? AppIcon.CreateTaskbarOverlay(unread) : null;
+        TaskbarItemInfo.Description = unread > 0 ? $"Непрочитанных: {unread}" : "";
+        UpdateMuteButton();
     }
 
     // ---- Брандмауэр ----
@@ -234,6 +245,12 @@ public partial class MainWindow : Window
         if (_current == null) return;
 
         ChatTitleText.Text = _current.IsEveryone ? "Сообщение всем" : _current.Title;
+        UpdateMuteButton();
+        if (_current.IsTyping)
+        {
+            ChatStatusText.Text = _current.TypingText;
+            return;
+        }
         if (_current.IsEveryone)
         {
             var count = _chat.OnlineCount;
@@ -248,6 +265,21 @@ public partial class MainWindow : Window
                 ? $"в сети · {_current.Peer!.Machine} · {_current.Peer.Address}"
                 : "не в сети — сообщения будут доставлены, когда компьютер появится";
         }
+    }
+
+    private void UpdateMuteButton()
+    {
+        if (_current is not { IsEveryone: false } contact) return;
+        MuteButton.Content = contact.IsMuted ? "🔕" : "🔔";
+        MuteButton.ToolTip = contact.IsMuted
+            ? "Уведомления выключены: сообщения приходят без всплывающих окон. Нажмите, чтобы включить"
+            : "Выключить уведомления от этой переписки";
+    }
+
+    private void ToggleMute_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current is { IsEveryone: false } contact)
+            _chat.SetMuted(contact, !contact.IsMuted);
     }
 
     private void UpdateMessagesHint()
@@ -271,6 +303,13 @@ public partial class MainWindow : Window
     }
 
     private void Send_Click(object sender, RoutedEventArgs e) => SendCurrent();
+
+    private void InputBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // Сообщаем собеседнику «печатает…», только когда набирают текст, а не когда поле очистилось после отправки.
+        if (_current != null && InputBox.Text.Length > 0 && InputBox.IsKeyboardFocusWithin)
+            _chat.NotifyTyping(_current);
+    }
 
     private async void SendCurrent()
     {
@@ -570,6 +609,9 @@ public partial class MainWindow : Window
             return;
         }
 
+        var mute = new MenuItem { Header = contact.IsMuted ? "Включить уведомления" : "Выключить уведомления" };
+        mute.Click += (_, _) => _chat.SetMuted(contact, !contact.IsMuted);
+
         var clear = new MenuItem { Header = "Очистить переписку", IsEnabled = contact.Messages.Count > 0 };
         clear.Click += (_, _) => ConfirmClear(contact);
 
@@ -582,7 +624,7 @@ public partial class MainWindow : Window
         ToolTipService.SetShowOnDisabled(remove, true);
         remove.Click += (_, _) => ConfirmRemove(contact);
 
-        ContactsList.ContextMenu = new ContextMenu { Items = { clear, remove } };
+        ContactsList.ContextMenu = new ContextMenu { Items = { mute, new Separator(), clear, remove } };
     }
 
     private void ConfirmClear(Contact contact)

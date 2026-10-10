@@ -13,6 +13,9 @@ public sealed class AppSettings
 
     /// <summary>Запускаться вместе с Windows (сразу в трей).</summary>
     public bool AutoStart { get; set; } = true;
+
+    /// <summary>Переписки, по которым не показывать всплывающие окна (по Id собеседника или группы).</summary>
+    public List<Guid> MutedChats { get; set; } = new();
 }
 
 /// <summary>Хранит настройки в %AppData%\OfficeChat\settings.json.</summary>

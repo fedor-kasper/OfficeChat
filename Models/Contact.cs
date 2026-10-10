@@ -25,8 +25,8 @@ public sealed class Contact : INotifyPropertyChanged
     /// <summary>Вручную убрать из списка можно только того, кто не в сети.</summary>
     public bool CanRemove => Peer is { IsOnline: false };
 
-    public string Subtitle => Peer == null
-        ? "Отправить каждому, кто в сети"
+    public string Subtitle => IsTyping ? TypingText
+        : Peer == null ? "Отправить каждому, кто в сети"
         : Peer.IsOnline ? $"{Peer.Machine} · {Peer.Address}" : "не в сети";
 
     public int UnreadCount
@@ -42,6 +42,39 @@ public sealed class Contact : INotifyPropertyChanged
     }
 
     public bool HasUnread => UnreadCount > 0;
+
+    /// <summary>Уведомления выключены: сообщения приходят без всплывающих окон и не заставляют мигать значок.</summary>
+    public bool IsMuted
+    {
+        get => _isMuted;
+        set
+        {
+            if (_isMuted == value) return;
+            _isMuted = value;
+            OnPropertyChanged();
+        }
+    }
+    private bool _isMuted;
+
+    /// <summary>«печатает…» (в группе — с именем); пусто, если никто не печатает.</summary>
+    public string TypingText
+    {
+        get => _typingText;
+        set
+        {
+            if (_typingText == value) return;
+            _typingText = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsTyping));
+            OnPropertyChanged(nameof(Subtitle));
+        }
+    }
+    private string _typingText = "";
+
+    public bool IsTyping => _typingText.Length > 0;
+
+    /// <summary>До какого момента показывать «печатает…» (если не придёт новое уведомление).</summary>
+    public DateTime TypingUntil { get; set; }
 
     /// <summary>В истории есть сообщения раньше загруженных в окно.</summary>
     public bool HasOlderMessages

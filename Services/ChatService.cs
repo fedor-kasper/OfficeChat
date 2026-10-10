@@ -14,6 +14,10 @@ public sealed class ChatService : IDisposable
 {
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
 
+    // «печатает…»: отправляем не чаще раза в несколько секунд, показываем чуть дольше этого интервала.
+    private static readonly TimeSpan TypingSendInterval = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan TypingShowTime = TimeSpan.FromSeconds(6);
+
     /// <summary>Сколько последних сообщений показывать сразу (и подгружать по кнопке).</summary>
     private const int PageSize = 200;
 
@@ -26,6 +30,9 @@ public sealed class ChatService : IDisposable
     // Собеседники, которых нельзя убирать из списка (например, с ними идёт игра).
     private readonly HashSet<Guid> _pinnedPeers = new();
     private readonly DispatcherTimer _retryTimer;
+    private readonly DispatcherTimer _typingTimer;
+    // Когда последний раз сообщали собеседнику, что мы печатаем.
+    private readonly Dictionary<Guid, DateTime> _typingSent = new();
 
     /// <summary>«Все» первым, затем компьютеры по алфавиту.</summary>
     public ObservableCollection<Contact> Contacts { get; } = new();
@@ -35,7 +42,7 @@ public sealed class ChatService : IDisposable
     /// <summary>Пришло новое входящее сообщение.</summary>
     public event Action<Contact, ChatMessage>? MessageReceived;
 
-    /// <summary>Изменилось общее число непрочитанных.</summary>
+    /// <summary>Изменилось число непрочитанных (или у переписки включили/выключили уведомления).</summary>
     public event Action? UnreadChanged;
 
     /// <summary>Кто-то появился в сети или ушёл.</summary>
@@ -50,7 +57,8 @@ public sealed class ChatService : IDisposable
     /// </summary>
     public Func<Contact, bool> IsConversationVisible { get; set; } = _ => false;
 
-    public int TotalUnread => _contactsByPeer.Values.Sum(c => c.UnreadCount);
+    /// <summary>Непрочитанные в переписках с включёнными уведомлениями — их показывает значок в трее.</summary>
+    public int TotalUnread => _contactsByPeer.Values.Where(c => !c.IsMuted).Sum(c => c.UnreadCount);
 
     /// <summary>TCP-порт, на котором принимаем сообщения.</summary>
     public int MessagingPort => _messaging.Port;
@@ -73,6 +81,9 @@ public sealed class ChatService : IDisposable
         _retryTimer = new DispatcherTimer { Interval = RetryInterval };
         _retryTimer.Tick += (_, _) => FlushAll();
 
+        _typingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _typingTimer.Tick += (_, _) => ExpireTyping();
+
         LoadHistory();
     }
 
@@ -83,10 +94,62 @@ public sealed class ChatService : IDisposable
         _discovery.MessagingPort = _messaging.Port;
         _discovery.Start();
         _retryTimer.Start();
+        _typingTimer.Start();
     }
 
     /// <summary>Сразу разослать актуальные данные о себе (после смены имени).</summary>
     public void AnnounceNow() => _discovery.AnnounceNow();
+
+    // ---- Уведомления ----
+
+    /// <summary>Включает или выключает всплывающие окна для переписки (запоминается в настройках).</summary>
+    public void SetMuted(Contact contact, bool muted)
+    {
+        if (contact.IsEveryone || contact.IsMuted == muted) return;
+        contact.IsMuted = muted;
+        var id = contact.Peer!.Id;
+        _settings.MutedChats.Remove(id);
+        if (muted) _settings.MutedChats.Add(id);
+        SettingsService.Save(_settings);
+        UnreadChanged?.Invoke();
+    }
+
+    // ---- «печатает…» ----
+
+    /// <summary>
+    /// Пользователь набирает текст в переписке — сообщаем собеседнику (не чаще раза в несколько секунд).
+    /// Не доходит — не страшно: это не сообщение, повторять не нужно.
+    /// </summary>
+    public void NotifyTyping(Contact contact)
+    {
+        if (contact.IsEveryone || !contact.IsOnline) return;
+        var id = contact.Peer!.Id;
+        var now = DateTime.UtcNow;
+        if (_typingSent.TryGetValue(id, out var last) && now - last < TypingSendInterval) return;
+        _typingSent[id] = now;
+        _ = SendPacketAsync(contact, new ChatPacket { Type = ChatPacket.Typing, Id = Guid.NewGuid() });
+    }
+
+    /// <summary>Сообщение ушло — следующее нажатие клавиши снова сообщит «печатает…».</summary>
+    private void ResetTypingSent(Contact contact)
+    {
+        if (contact.Peer != null) _typingSent.Remove(contact.Peer.Id);
+    }
+
+    private void ShowTyping(Contact contact, string text)
+    {
+        contact.TypingUntil = DateTime.UtcNow + TypingShowTime;
+        contact.TypingText = text;
+    }
+
+    private static void StopTyping(Contact contact) => contact.TypingText = "";
+
+    private void ExpireTyping()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var contact in _contactsByPeer.Values.Where(c => c.IsTyping && c.TypingUntil < now))
+            StopTyping(contact);
+    }
 
     // ---- История ----
 
@@ -401,6 +464,7 @@ public sealed class ChatService : IDisposable
         contact.Messages.Add(message);
         _store.SaveContact(contact.Peer!);
         Save(contact, message);
+        ResetTypingSent(contact);
         _ = FlushAsync(contact);
         return message;
     }
@@ -536,6 +600,9 @@ public sealed class ChatService : IDisposable
             case ChatPacket.File:
                 ReceiveMessage(contact, packet);
                 break;
+            case ChatPacket.Typing:
+                ShowTyping(contact, "печатает…");
+                break;
             case not null when packet.Type.StartsWith("game-", StringComparison.Ordinal):
                 GamePacketReceived?.Invoke(contact, packet);
                 break;
@@ -595,6 +662,9 @@ public sealed class ChatService : IDisposable
             }
         }
 
+        // Сообщение пришло — значит, собеседник уже не печатает.
+        StopTyping(contact);
+
         var message = new ChatMessage
         {
             Id = packet.Id,
@@ -642,6 +712,7 @@ public sealed class ChatService : IDisposable
         if (!_contactsByPeer.TryGetValue(peer.Id, out var contact)) return;
         foreach (var message in contact.Messages.Where(m => m.CanCancel))
             message.PeerOffline = true;
+        StopTyping(contact);
         RemoveIfForgotten(contact);
         PresenceChanged?.Invoke();
     }
@@ -652,6 +723,7 @@ public sealed class ChatService : IDisposable
             return contact;
 
         contact = Contact.For(peer);
+        contact.IsMuted = _settings.MutedChats.Contains(peer.Id);
         _contactsByPeer.Add(peer.Id, contact);
 
         var index = 1;
@@ -675,6 +747,7 @@ public sealed class ChatService : IDisposable
     public void Dispose()
     {
         _retryTimer.Stop();
+        _typingTimer.Stop();
         _discovery.Dispose();
         _messaging.Dispose();
         _store.Dispose();

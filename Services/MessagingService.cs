@@ -189,8 +189,10 @@ public sealed class MessagingService : IDisposable
                 .ConfigureAwait(false);
             tempFile = null; // теперь файлом распоряжается получатель пакета
 
-            Log.Info($"Получен «{packet.Type}» от «{packet.FromName}» ({from}:{packet.FromPort})" +
-                     (packet.PayloadLength > 0 ? $", вложение {packet.PayloadLength / 1024} КБ" : ""));
+            // «печатает…» приходит каждые несколько секунд — в лог не пишем.
+            if (packet.Type != ChatPacket.Typing)
+                Log.Info($"Получен «{packet.Type}» от «{packet.FromName}» ({from}:{packet.FromPort})" +
+                         (packet.PayloadLength > 0 ? $", вложение {packet.PayloadLength / 1024} КБ" : ""));
             _uiContext.Post(_ => PacketReceived?.Invoke(packet, from), null);
         }
         catch (Exception ex) when (ex is SocketException or IOException or OperationCanceledException
@@ -296,6 +298,9 @@ public sealed class ChatPacket
 
     /// <summary>Отметка «прочитано» для сообщений из <see cref="MessageIds"/>.</summary>
     public const string ReadReceipt = "read";
+
+    /// <summary>Отправитель набирает сообщение (показываем «печатает…» несколько секунд).</summary>
+    public const string Typing = "typing";
 
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
