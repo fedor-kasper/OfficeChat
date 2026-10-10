@@ -270,7 +270,8 @@ public partial class MainWindow : Window
     private void UpdateMuteButton()
     {
         if (_current is not { IsEveryone: false } contact) return;
-        MuteButton.Content = contact.IsMuted ? "🔕" : "🔔";
+        // Выключенные уведомления подписываем словами: значки 🔔 и 🔕 в мелком шрифте легко спутать.
+        MuteButton.Content = contact.IsMuted ? "🔕 Уведомления выключены" : "🔔";
         MuteButton.ToolTip = contact.IsMuted
             ? "Уведомления выключены: сообщения приходят без всплывающих окон. Нажмите, чтобы включить"
             : "Выключить уведомления от этой переписки";
