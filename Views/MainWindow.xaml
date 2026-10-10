@@ -10,14 +10,40 @@
         <local:NotNullToVisibilityConverter x:Key="NotNullToVisibility" />
         <local:ImageThumbnailConverter x:Key="Thumbnail" DecodeWidth="640" />
 
+        <!-- Меню сообщения (правый клик по пузырьку или по его тексту); у каждого пузырька — своя копия -->
+        <ContextMenu x:Key="MessageMenu" x:Shared="False">
+            <MenuItem Header="Ответить" Click="ReplyMessage_Click"
+                      Visibility="{Binding CanReply, Converter={StaticResource BoolToVisibility}}" />
+            <MenuItem Header="Изменить" Click="EditMessage_Click"
+                      Visibility="{Binding CanEdit, Converter={StaticResource BoolToVisibility}}" />
+            <MenuItem Header="Копировать текст" Click="CopyMessage_Click"
+                      Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
+            <Separator />
+            <MenuItem Header="Удалить у себя" Click="DeleteForMe_Click" />
+            <MenuItem Header="Удалить у всех" Click="DeleteForAll_Click"
+                      Visibility="{Binding CanDeleteForEveryone, Converter={StaticResource BoolToVisibility}}" />
+        </ContextMenu>
+
         <!-- Пузырёк сообщения: входящие слева серые, исходящие справа синие, ждущие в очереди — жёлтые -->
         <DataTemplate x:Key="MessageTemplate">
             <Border x:Name="Bubble" MaxWidth="460" Margin="0,3" Padding="10,6,10,5" CornerRadius="10"
-                    HorizontalAlignment="Left" Background="#EEF0F3">
+                    HorizontalAlignment="Left" Background="#EEF0F3" ContextMenu="{StaticResource MessageMenu}">
                 <StackPanel>
                     <TextBlock Text="сообщение всем" FontSize="10" Margin="0,0,0,2"
                                Foreground="{StaticResource MutedTextBrush}"
                                Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- Цитата: на какое сообщение это ответ; клик — показать оригинал -->
+                    <Border Visibility="{Binding HasReply, Converter={StaticResource BoolToVisibility}}"
+                            BorderBrush="{StaticResource AccentBrush}" BorderThickness="3,0,0,0" Background="#0D000000"
+                            CornerRadius="4" Padding="8,3" Margin="0,0,0,4" Cursor="Hand" ToolTip="Показать сообщение"
+                            MouseLeftButtonUp="Quote_Click">
+                        <StackPanel>
+                            <TextBlock Text="{Binding ReplyAuthor}" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource AccentBrush}" />
+                            <TextBlock Text="{Binding ReplyText}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                       Foreground="#374151" />
+                        </StackPanel>
+                    </Border>
                     <!-- Изображение: превью в ленте, клик — просмотр, правый клик — сохранить/копировать -->
                     <Border Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}"
                             Margin="-6,-2,-6,4" CornerRadius="8" Background="#11000000" Cursor="Hand"
@@ -34,6 +60,13 @@
                                 <MenuItem Header="Сохранить как…" Click="ImageSave_Click" />
                                 <MenuItem Header="Копировать" Click="ImageCopy_Click" />
                                 <MenuItem Header="Открыть в программе просмотра" Click="ImageOpenExternal_Click" />
+                                <Separator />
+                                <MenuItem Header="Ответить" Click="ReplyMessage_Click" />
+                                <MenuItem Header="Изменить подпись" Click="EditMessage_Click"
+                                          Visibility="{Binding CanEdit, Converter={StaticResource BoolToVisibility}}" />
+                                <MenuItem Header="Удалить у себя" Click="DeleteForMe_Click" />
+                                <MenuItem Header="Удалить у всех" Click="DeleteForAll_Click"
+                                          Visibility="{Binding CanDeleteForEveryone, Converter={StaticResource BoolToVisibility}}" />
                             </ContextMenu>
                         </Border.ContextMenu>
                     </Border>
@@ -61,11 +94,12 @@
                     <!-- Текст без ссылок — выделяется мышью; со ссылками — ссылки кликабельны, копирование через меню -->
                     <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
                              FontSize="14" BorderThickness="0" Background="Transparent" Padding="0"
+                             ContextMenu="{StaticResource MessageMenu}"
                              Visibility="{Binding HasPlainText, Converter={StaticResource BoolToVisibility}}" />
                     <TextBlock local:LinkText.Source="{Binding Text}" TextWrapping="Wrap" FontSize="14"
                                Visibility="{Binding HasLinks, Converter={StaticResource BoolToVisibility}}" />
                     <DockPanel Margin="0,3,0,0">
-                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="10,0,0,0"
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding TimeLabel}" FontSize="10" Margin="10,0,0,0"
                                    Foreground="{StaticResource MutedTextBrush}" />
                         <TextBlock Text="{Binding StatusText}" FontSize="10" TextWrapping="Wrap"
                                    Foreground="{StaticResource MutedTextBrush}" />
@@ -135,6 +169,10 @@
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      SelectionChanged="ContactsList_SelectionChanged"
                      ContextMenuOpening="ContactsList_ContextMenuOpening">
+                <!-- Пустое меню-заготовка: WPF открывает меню, только если оно задано заранее; пункты — в коде -->
+                <ListBox.ContextMenu>
+                    <ContextMenu />
+                </ListBox.ContextMenu>
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <DockPanel Margin="6,6">
@@ -225,6 +263,22 @@
                     <TextBlock x:Name="NoticeText" DockPanel.Dock="Top" Margin="2,0,0,6" FontSize="11"
                                TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
                                Visibility="Collapsed" />
+
+                    <!-- Ответ на сообщение или его редактирование: что именно, и как отменить -->
+                    <Border x:Name="ComposeBar" DockPanel.Dock="Top" Margin="0,0,0,8" Padding="10,5"
+                            Visibility="Collapsed" Background="#F1F5FB" BorderBrush="{StaticResource AccentBrush}"
+                            BorderThickness="3,0,0,0" CornerRadius="4">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Content="✕" Padding="7,1" FontSize="12"
+                                    VerticalAlignment="Center" ToolTip="Отменить (Esc)" Click="CancelCompose_Click" />
+                            <StackPanel>
+                                <TextBlock x:Name="ComposeTitle" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource AccentBrush}" />
+                                <TextBlock x:Name="ComposeText" FontSize="12" TextTrimming="CharacterEllipsis"
+                                           Foreground="#374151" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
 
                     <!-- Изображения, выбранные для отправки: уйдут по «Отправить», текст станет подписью -->
                     <ScrollViewer x:Name="AttachmentsBar" DockPanel.Dock="Top" Margin="0,0,0,8"

@@ -9,6 +9,12 @@ namespace OfficeChat.Services;
 public sealed record StoredContact(Guid Id, string Name, string Machine, IPAddress Address);
 
 /// <summary>
+/// Служебный пакет в очереди на отправку конкретному собеседнику (правка, удаление и т. п.).
+/// Хранится в базе, чтобы дойти, даже если собеседник появится в сети после перезапуска программы.
+/// </summary>
+public sealed record OutboxItem(long Seq, Guid PeerId, string PacketJson);
+
+/// <summary>
 /// История переписки в локальной базе SQLite (%AppData%\OfficeChat\history.db).
 /// Хранится всё: сообщения, их статусы, очередь неотправленных.
 /// </summary>
@@ -55,6 +61,19 @@ public sealed class HistoryStore : IDisposable
         AddColumnIfMissing("file_name", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("file_path", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("file_size", "INTEGER NOT NULL DEFAULT 0");
+        // Ответы и правка сообщений.
+        AddColumnIfMissing("reply_to", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("reply_author", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("reply_text", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("edited", "INTEGER NOT NULL DEFAULT 0");
+
+        Execute("""
+            CREATE TABLE IF NOT EXISTS outbox (
+                seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+                peer_id TEXT NOT NULL,
+                packet  TEXT NOT NULL
+            );
+            """);
     }
 
     // ---- Контакты ----
@@ -142,10 +161,12 @@ public sealed class HistoryStore : IDisposable
     public void SaveMessage(Guid peerId, ChatMessage message)
     {
         using var cmd = Command("""
-            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size)
+            INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind,
+                                  file_name, file_path, file_size, reply_to, reply_author, reply_text, edited)
             VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
-                    $filePath, $fileSize)
-            ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt
+                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited)
+            ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt,
+                                           text = $text, edited = $edited
             """);
         cmd.Parameters.AddWithValue("$id", message.Id.ToString());
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
@@ -160,6 +181,54 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$fileName", message.FileName);
         cmd.Parameters.AddWithValue("$filePath", message.FilePath);
         cmd.Parameters.AddWithValue("$fileSize", message.FileSize);
+        cmd.Parameters.AddWithValue("$replyTo", message.ReplyToId?.ToString() ?? "");
+        cmd.Parameters.AddWithValue("$replyAuthor", message.ReplyAuthor);
+        cmd.Parameters.AddWithValue("$replyText", message.ReplyText);
+        cmd.Parameters.AddWithValue("$edited", message.IsEdited);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Сообщение по Id вместе с перепиской, в которой оно лежит (null — нет такого).</summary>
+    public (Guid PeerId, ChatMessage Message)? LoadMessage(Guid id)
+    {
+        using var cmd = Command($"SELECT {MessageColumns}, peer_id FROM messages WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return null;
+        return (Guid.Parse(reader.GetString(MessageColumnCount)), ReadMessage(reader));
+    }
+
+    // ---- Очередь служебных пакетов ----
+
+    public List<OutboxItem> LoadOutbox()
+    {
+        using var cmd = Command("SELECT seq, peer_id, packet FROM outbox ORDER BY seq");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<OutboxItem>();
+        while (reader.Read())
+            result.Add(new OutboxItem(reader.GetInt64(0), Guid.Parse(reader.GetString(1)), reader.GetString(2)));
+        return result;
+    }
+
+    public OutboxItem AddOutbox(Guid peerId, string packetJson)
+    {
+        using var cmd = Command("INSERT INTO outbox (peer_id, packet) VALUES ($peer, $packet) RETURNING seq");
+        cmd.Parameters.AddWithValue("$peer", peerId.ToString());
+        cmd.Parameters.AddWithValue("$packet", packetJson);
+        return new OutboxItem((long)cmd.ExecuteScalar()!, peerId, packetJson);
+    }
+
+    public void DeleteOutbox(long seq)
+    {
+        using var cmd = Command("DELETE FROM outbox WHERE seq = $seq");
+        cmd.Parameters.AddWithValue("$seq", seq);
+        cmd.ExecuteNonQuery();
+    }
+
+    public void DeleteOutboxForPeer(Guid peerId)
+    {
+        using var cmd = Command("DELETE FROM outbox WHERE peer_id = $peer");
+        cmd.Parameters.AddWithValue("$peer", peerId.ToString());
         cmd.ExecuteNonQuery();
     }
 
@@ -232,37 +301,48 @@ public sealed class HistoryStore : IDisposable
     // ---- Служебное ----
 
     private const string MessageColumns =
-        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size";
+        "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size, " +
+        "reply_to, reply_author, reply_text, edited";
+
+    private const int MessageColumnCount = 16;
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
         using var reader = cmd.ExecuteReader();
         var result = new List<ChatMessage>();
         while (reader.Read())
-        {
-            var status = (MessageStatus)reader.GetInt32(5);
-            var id = Guid.Parse(reader.GetString(0));
-            var kind = (MessageKind)reader.GetInt32(8);
-            var fileName = reader.GetString(9);
-            result.Add(new ChatMessage
-            {
-                Id = id,
-                IsOutgoing = reader.GetBoolean(1),
-                Text = reader.GetString(2),
-                Timestamp = new DateTime(reader.GetInt64(3)),
-                IsBroadcast = reader.GetBoolean(4),
-                // Если программу закрыли посреди отправки — отправим заново.
-                Status = status == MessageStatus.Sending ? MessageStatus.Queued : status,
-                IsRead = reader.GetBoolean(6),
-                ReadReceiptSent = reader.GetBoolean(7),
-                Kind = kind,
-                FileName = fileName,
-                ImagePath = kind == MessageKind.Image ? ImageStore.PathFor(id, fileName) : "",
-                FilePath = reader.GetString(10),
-                FileSize = reader.GetInt64(11),
-            });
-        }
+            result.Add(ReadMessage(reader));
         return result;
+    }
+
+    private static ChatMessage ReadMessage(SqliteDataReader reader)
+    {
+        var status = (MessageStatus)reader.GetInt32(5);
+        var id = Guid.Parse(reader.GetString(0));
+        var kind = (MessageKind)reader.GetInt32(8);
+        var fileName = reader.GetString(9);
+        var replyTo = reader.GetString(12);
+        return new ChatMessage
+        {
+            Id = id,
+            IsOutgoing = reader.GetBoolean(1),
+            Text = reader.GetString(2),
+            Timestamp = new DateTime(reader.GetInt64(3)),
+            IsBroadcast = reader.GetBoolean(4),
+            // Если программу закрыли посреди отправки — отправим заново.
+            Status = status == MessageStatus.Sending ? MessageStatus.Queued : status,
+            IsRead = reader.GetBoolean(6),
+            ReadReceiptSent = reader.GetBoolean(7),
+            Kind = kind,
+            FileName = fileName,
+            ImagePath = kind == MessageKind.Image ? ImageStore.PathFor(id, fileName) : "",
+            FilePath = reader.GetString(10),
+            FileSize = reader.GetInt64(11),
+            ReplyToId = replyTo.Length > 0 ? Guid.Parse(replyTo) : null,
+            ReplyAuthor = reader.GetString(13),
+            ReplyText = reader.GetString(14),
+            IsEdited = reader.GetBoolean(15),
+        };
     }
 
     private SqliteCommand Command(string sql)

@@ -32,7 +32,23 @@ public sealed class ChatMessage : INotifyPropertyChanged
 
     public required Guid Id { get; init; }
     public required bool IsOutgoing { get; init; }
-    public required string Text { get; init; }
+    /// <summary>Текст (у изображения и файла — подпись). Меняется, если сообщение отредактировали.</summary>
+    public required string Text
+    {
+        get => _text;
+        set
+        {
+            if (_text == value) return;
+            _text = value;
+            _hasLinks = null;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasText));
+            OnPropertyChanged(nameof(HasLinks));
+            OnPropertyChanged(nameof(HasPlainText));
+            OnPropertyChanged(nameof(PreviewText));
+        }
+    }
+    private string _text = "";
     public required DateTime Timestamp { get; init; }
 
     public MessageKind Kind { get; init; }
@@ -106,6 +122,52 @@ public sealed class ChatMessage : INotifyPropertyChanged
     /// <summary>Сообщение было отправлено «Всем», а не лично.</summary>
     public bool IsBroadcast { get; init; }
 
+    // ---- Ответ, правка ----
+
+    /// <summary>На какое сообщение это ответ (null — не ответ).</summary>
+    public Guid? ReplyToId { get; init; }
+
+    /// <summary>Автор сообщения, на которое ответили («Вы» — если на ваше).</summary>
+    public string ReplyAuthor { get; init; } = "";
+
+    /// <summary>Начало текста сообщения, на которое ответили (сохраняется, даже если оригинал удалят).</summary>
+    public string ReplyText { get; init; } = "";
+
+    public bool HasReply => ReplyToId != null;
+
+    /// <summary>Сообщение отредактировано после отправки.</summary>
+    public bool IsEdited
+    {
+        get => _isEdited;
+        set
+        {
+            if (Set(ref _isEdited, value))
+                OnPropertyChanged(nameof(TimeLabel));
+        }
+    }
+    private bool _isEdited;
+
+    /// <summary>Ответить можно на любое сообщение, кроме служебной записи об игре.</summary>
+    public bool CanReply => !IsGame;
+
+    /// <summary>Изменить можно свой текст или подпись к вложению.</summary>
+    public bool CanEdit => IsOutgoing && !IsGame;
+
+    /// <summary>Удалить у собеседника можно только своё сообщение.</summary>
+    public bool CanDeleteForEveryone => IsOutgoing && !IsGame;
+
+    /// <summary>Короткая цитата для ответа: начало текста или описание вложения.</summary>
+    public string QuoteText
+    {
+        get
+        {
+            var text = PreviewText.ReplaceLineEndings(" ");
+            return text.Length > MaxQuoteLength ? text[..MaxQuoteLength] + "…" : text;
+        }
+    }
+
+    public const int MaxQuoteLength = 150;
+
     // ---- Исходящие ----
 
     public MessageStatus Status
@@ -176,9 +238,12 @@ public sealed class ChatMessage : INotifyPropertyChanged
         ? Timestamp.ToString("HH:mm")
         : Timestamp.ToString("dd.MM HH:mm");
 
+    /// <summary>Время под сообщением, с пометкой «изменено» для отредактированных.</summary>
+    public string TimeLabel => IsEdited ? $"изменено {TimeText}" : TimeText;
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    private void OnPropertyChanged(string name) =>
+    private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? name = null)
