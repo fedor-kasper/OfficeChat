@@ -13,6 +13,57 @@
             <GradientStop Color="#3B82F6" Offset="1" />
         </LinearGradientBrush>
 
+        <!-- Обычная кнопка для всей программы: светлая, со скруглёнными углами и подсветкой при наведении.
+             Стандартная кнопка Windows (серый квадрат) выглядит чужой рядом с остальным оформлением.
+             Кнопка по умолчанию в окне (IsDefault, например «Сохранить») — синяя. -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#F3F5F8" />
+            <Setter Property="Foreground" Value="#111827" />
+            <Setter Property="BorderBrush" Value="#D5DAE1" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid>
+                            <Border x:Name="Root" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" />
+                            <!-- Затемнение при наведении и нажатии — подходит к кнопке любого цвета -->
+                            <Border x:Name="Shade" Background="#000000" Opacity="0" CornerRadius="6"
+                                    IsHitTestVisible="False" />
+                            <ContentPresenter Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Shade" Property="Opacity" Value="0.06" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Shade" Property="Opacity" Value="0.12" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Root" Property="BorderBrush" Value="#2563EB" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsDefault" Value="True">
+                    <Setter Property="Background" Value="#2563EB" />
+                    <Setter Property="BorderBrush" Value="#2563EB" />
+                    <Setter Property="Foreground" Value="White" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
         <!-- Плоская кнопка с цветным фоном (стандартная кнопка WPF игнорирует фон при наведении) -->
         <Style x:Key="FlatButton" TargetType="Button">
             <Setter Property="Foreground" Value="White" />
