@@ -230,7 +230,8 @@
                                                 </DockPanel>
                                             </Border>
 
-                                            <SelectableTextBlock Classes="message" Text="{Binding Text}" IsVisible="{Binding HasText}" />
+                                            <!-- Текст выделяется, ссылки в нём кликабельны -->
+                                            <local:LinkTextBlock Classes="message" LinkedText="{Binding Text}" IsVisible="{Binding HasText}" />
                                             <DockPanel Margin="0,3,0,0">
                                                 <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="10,0,0,0"
                                                            Foreground="{StaticResource MutedTextBrush}" />

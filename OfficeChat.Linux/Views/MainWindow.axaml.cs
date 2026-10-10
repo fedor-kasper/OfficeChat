@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
@@ -404,19 +405,37 @@ public partial class MainWindow : Window
         try
         {
             var errors = new List<string>();
-            var images = await PendingAttachment.FromClipboardAsync(Clipboard, errors);
-            if (images == null)
+            var attachments = await PendingAttachment.FromClipboardAsync(Clipboard, errors);
+            if (attachments != null)
             {
-                InputBox.Paste(); // в буфере текст — вставляем как обычно
+                AddAttachments(attachments, errors);
                 return;
             }
-            AddAttachments(images, errors);
+            // В буфере текст. Стандартная вставка TextBox после перехвата Ctrl+V не срабатывает —
+            // вставляем сами: в позицию курсора, заменяя выделенное.
+            if (await Clipboard.TryGetTextAsync() is { Length: > 0 } text)
+                InsertIntoInput(text);
         }
         catch (Exception ex)
         {
             Log.Warn("Не удалось прочитать буфер обмена", ex);
-            InputBox.Paste();
         }
+    }
+
+    private void InsertIntoInput(string paste)
+    {
+        var current = InputBox.Text ?? "";
+        var start = Math.Clamp(Math.Min(InputBox.SelectionStart, InputBox.SelectionEnd), 0, current.Length);
+        var end = Math.Clamp(Math.Max(InputBox.SelectionStart, InputBox.SelectionEnd), 0, current.Length);
+        paste = paste.Replace("\r\n", "\n");
+        if (InputBox.MaxLength > 0)
+        {
+            var room = InputBox.MaxLength - (current.Length - (end - start));
+            if (room <= 0) return;
+            if (paste.Length > room) paste = paste[..room];
+        }
+        InputBox.Text = current[..start] + paste + current[end..];
+        InputBox.SelectionStart = InputBox.SelectionEnd = InputBox.CaretIndex = start + paste.Length;
     }
 
     // ---- Изображения: перетаскивание файлов в окно ----
