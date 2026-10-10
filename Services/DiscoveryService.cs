@@ -32,6 +32,11 @@ public sealed class DiscoveryService : IDisposable
     /// <summary>Наш TCP-порт сообщений — сообщаем его остальным в каждом пакете обнаружения.</summary>
     public int MessagingPort { get; set; } = Peer.DefaultMessagingPort;
 
+    /// <summary>Наша версия, система и можно ли взять у нас обновление — тоже сообщаем остальным.</summary>
+    public string AppVersion { get; set; } = "";
+    public string Platform { get; set; } = "";
+    public bool CanShareUpdate { get; set; }
+
     public DiscoveryService(AppSettings settings)
     {
         _settings = settings;
@@ -131,6 +136,12 @@ public sealed class DiscoveryService : IDisposable
         }
 
         var cameOnline = Observe(packet.Id, packet.Name, packet.Machine, from, packet.Port);
+        if (_peers.TryGetValue(packet.Id, out var peer))
+        {
+            peer.AppVersion = packet.Version;
+            peer.Platform = packet.Platform;
+            peer.CanShareUpdate = packet.CanShareUpdate;
+        }
 
         // Отвечаем напрямую на адрес и порт отправителя:
         // - новичку — чтобы он увидел нас сразу, не дожидаясь нашей рассылки;
@@ -212,6 +223,9 @@ public sealed class DiscoveryService : IDisposable
         Name = _settings.DisplayName,
         Machine = Environment.MachineName,
         Port = MessagingPort,
+        Version = AppVersion,
+        Platform = Platform,
+        CanShareUpdate = CanShareUpdate,
     };
 
     private void Broadcast(DiscoveryPacket packet)
@@ -288,4 +302,9 @@ public sealed class DiscoveryPacket
 
     /// <summary>TCP-порт сообщений отправителя (0 у старых версий — стандартный).</summary>
     public int Port { get; set; }
+
+    /// <summary>Версия программы, система и можно ли взять у отправителя обновление (у старых версий пусто).</summary>
+    public string Version { get; set; } = "";
+    public string Platform { get; set; } = "";
+    public bool CanShareUpdate { get; set; }
 }

@@ -52,6 +52,9 @@ public sealed class GameService : IDisposable
     public BoardGame? GameFor(Contact contact) =>
         contact.Peer is { } peer ? _shown.GetValueOrDefault(peer.Id) : null;
 
+    /// <summary>Идёт хоть одна партия или ждёт ответа приглашение.</summary>
+    public bool HasActiveGames => _games.Count > 0;
+
     /// <summary>Незаконченная партия (или приглашение) с этим собеседником.</summary>
     public BoardGame? ActiveGameWith(Contact contact) =>
         GameFor(contact) is { State: GameState.Inviting or GameState.Invited or GameState.Playing } game ? game : null;
