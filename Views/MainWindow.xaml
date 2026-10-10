@@ -140,17 +140,23 @@
                         <DockPanel Margin="6,6">
                             <Ellipse x:Name="Dot" DockPanel.Dock="Left" Width="9" Height="9" Margin="0,0,10,0"
                                      VerticalAlignment="Center" Fill="{StaticResource OnlineBrush}" />
-                            <Border DockPanel.Dock="Right" MinWidth="20" Height="20" CornerRadius="10" Padding="6,0"
-                                    VerticalAlignment="Center" Background="{StaticResource AccentBrush}"
+                            <Border x:Name="UnreadBadge" DockPanel.Dock="Right" MinWidth="20" Height="20" CornerRadius="10"
+                                    Padding="6,0" VerticalAlignment="Center" Background="{StaticResource AccentBrush}"
                                     Visibility="{Binding HasUnread, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11"
                                            FontWeight="SemiBold" HorizontalAlignment="Center"
                                            VerticalAlignment="Center" />
                             </Border>
                             <StackPanel>
-                                <TextBlock x:Name="TitleText" Text="{Binding Title}" FontSize="14"
-                                           TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding Subtitle}" FontSize="11"
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="🔕" FontSize="11" Margin="4,0,0,0"
+                                               VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
+                                               ToolTip="Уведомления выключены"
+                                               Visibility="{Binding IsMuted, Converter={StaticResource BoolToVisibility}}" />
+                                    <TextBlock x:Name="TitleText" Text="{Binding Title}" FontSize="14"
+                                               TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <TextBlock x:Name="SubtitleText" Text="{Binding Subtitle}" FontSize="11"
                                            Foreground="{StaticResource MutedTextBrush}"
                                            TextTrimming="CharacterEllipsis" />
                             </StackPanel>
@@ -163,6 +169,13 @@
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsEveryone}" Value="True">
                                 <Setter TargetName="Dot" Property="Fill" Value="{StaticResource AccentBrush}" />
+                            </DataTrigger>
+                            <!-- Без уведомлений: счётчик серый, не отвлекает -->
+                            <DataTrigger Binding="{Binding IsMuted}" Value="True">
+                                <Setter TargetName="UnreadBadge" Property="Background" Value="#9CA3AF" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsTyping}" Value="True">
+                                <Setter TargetName="SubtitleText" Property="Foreground" Value="{StaticResource AccentBrush}" />
                             </DataTrigger>
                         </DataTemplate.Triggers>
                     </DataTemplate>
@@ -191,6 +204,8 @@
                         <Button Content="🎮 Крестики-нолики" Padding="8,2" Margin="0,0,6,0"
                                 ToolTip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
                                 Visibility="{Binding IsOnline, Converter={StaticResource BoolToVisibility}}" />
+                        <Button x:Name="MuteButton" Padding="6,2" Margin="0,0,6,0" FontFamily="Segoe UI Emoji"
+                                Click="ToggleMute_Click" />
                         <Button Content="Очистить переписку" Padding="8,2" Click="ClearConversation_Click" />
                         <Button Content="Удалить из списка" Padding="8,2" Margin="6,0,0,0"
                                 Click="RemoveContact_Click"
@@ -259,7 +274,7 @@
                     <TextBox x:Name="InputBox" FontSize="14" Padding="6,5" MinHeight="34" MaxHeight="120"
                              AcceptsReturn="True" TextWrapping="Wrap" MaxLength="4000"
                              VerticalScrollBarVisibility="Auto"
-                             PreviewKeyDown="InputBox_PreviewKeyDown" />
+                             PreviewKeyDown="InputBox_PreviewKeyDown" TextChanged="InputBox_TextChanged" />
                 </DockPanel>
             </Border>
 
