@@ -54,6 +54,15 @@ public sealed class Peer : INotifyPropertyChanged
 
     public DateTime LastSeen { get; set; }
 
+    /// <summary>Версия OfficeChat у собеседника (пусто — старая версия, которая её не сообщает).</summary>
+    public string AppVersion { get; set; } = "";
+
+    /// <summary>Для какой системы его сборка: «win-x64», «linux-x64».</summary>
+    public string Platform { get; set; } = "";
+
+    /// <summary>Его сборка подписана — у него можно взять обновление.</summary>
+    public bool CanShareUpdate { get; set; }
+
     public event PropertyChangedEventHandler? PropertyChanged;
 
     private void Set<T>(ref T field, T value, [CallerMemberName] string? name = null)

@@ -319,6 +319,12 @@ public sealed class ChatPacket
     public const string GroupRenamed = "rename";
     public const string GroupLeft = "leave";
 
+    /// <summary>Просьба прислать свою (более новую) сборку программы.</summary>
+    public const string UpdateRequest = "update-request";
+
+    /// <summary>Сборка программы вложением: версия — в <see cref="Text"/>, система — в <see cref="FileName"/>.</summary>
+    public const string UpdatePackage = "update-package";
+
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 

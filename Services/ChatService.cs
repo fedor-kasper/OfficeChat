@@ -57,6 +57,9 @@ public sealed partial class ChatService : IDisposable
     /// <summary>Сообщение убрано из переписки (удалено у себя или собеседником) — убрать его и из всплывающих окон.</summary>
     public event Action<Contact, ChatMessage>? MessageRemoved;
 
+    /// <summary>Пришёл пакет обновления программы (обрабатывает <see cref="UpdateService"/>).</summary>
+    public event Action<Contact, ChatPacket>? UpdatePacketReceived;
+
     /// <summary>Пришёл пакет мини-игры (обрабатывает <see cref="GameService"/>).</summary>
     public event Action<Contact, ChatPacket>? GamePacketReceived;
 
@@ -112,6 +115,19 @@ public sealed partial class ChatService : IDisposable
         _retryTimer.Start();
         _typingTimer.Start();
     }
+
+    /// <summary>Наша версия и система — для пакетов обнаружения (по ним коллеги находят обновление).</summary>
+    public void SetUpdateInfo(string version, string platform, bool canShare)
+    {
+        _discovery.AppVersion = version;
+        _discovery.Platform = platform;
+        _discovery.CanShareUpdate = canShare;
+        _discovery.AnnounceNow();
+    }
+
+    /// <summary>Сейчас передаётся вложение — перезапускаться для обновления не время.</summary>
+    public bool HasTransfersInProgress =>
+        Conversations.Any(c => c.Messages.Any(m => m.IsOutgoing && m.Status == MessageStatus.Sending));
 
     /// <summary>Сразу разослать актуальные данные о себе (после смены имени).</summary>
     public void AnnounceNow() => _discovery.AnnounceNow();
@@ -853,7 +869,8 @@ public sealed partial class ChatService : IDisposable
         var contact = GetOrAddContact(_discovery.Find(packet.From)!);
 
         // Вложение пришло к пакету, которому оно не положено (чужая версия) — не оставляем мусор.
-        if (packet.ReceivedPayloadPath != null && packet.Type is not (ChatPacket.Image or ChatPacket.File))
+        if (packet.ReceivedPayloadPath != null &&
+            packet.Type is not (ChatPacket.Image or ChatPacket.File or ChatPacket.UpdatePackage))
             FileStore.DeleteQuietly(packet.ReceivedPayloadPath);
 
         // Пакет относится к группе — дальше работаем с перепиской группы, а не с личной.
@@ -884,6 +901,10 @@ public sealed partial class ChatService : IDisposable
                 break;
             case ChatPacket.Delete:
                 ApplyDelete(conversation, packet);
+                break;
+            case ChatPacket.UpdateRequest:
+            case ChatPacket.UpdatePackage:
+                UpdatePacketReceived?.Invoke(contact, packet);
                 break;
             case ChatPacket.GroupUpdate when packet.IsGroup:
                 OnGroupUpdate(contact, packet);

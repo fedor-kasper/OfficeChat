@@ -17,6 +17,9 @@
         <CheckBox x:Name="AutoStartBox" Margin="0,16,0,0"
                   Content="Запускать вместе с Windows (сразу в трей)" />
 
+        <TextBlock x:Name="VersionText" Margin="0,14,0,0" FontSize="11" TextWrapping="Wrap"
+                   Foreground="{StaticResource MutedTextBrush}" Visibility="Collapsed" />
+
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
             <Button x:Name="OkButton" Content="Сохранить" Width="100" Padding="0,4"
                     IsDefault="True" Click="Ok_Click" />

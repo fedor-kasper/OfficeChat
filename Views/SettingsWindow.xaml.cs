@@ -17,6 +17,15 @@ public partial class SettingsWindow : Window
         AutoStartBox.IsChecked = autoStart;
     }
 
+    /// <summary>Номер версии внизу окна (и обновляется ли программа по сети).</summary>
+    public void ShowVersion(Version version, bool signed)
+    {
+        VersionText.Text = $"OfficeChat {version}" + (signed
+            ? " · обновляется сам, когда у коллег появляется новая версия"
+            : " · сборка без подписи, обновление по сети выключено");
+        VersionText.Visibility = Visibility.Visible;
+    }
+
     private void NameBox_TextChanged(object sender, TextChangedEventArgs e) =>
         OkButton.IsEnabled = EnteredName.Length > 0;
 

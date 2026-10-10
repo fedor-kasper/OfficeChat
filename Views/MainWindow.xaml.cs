@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly NotificationManager _notifications;
     private readonly TrayIcon _tray;
     private readonly GameService _games;
+    private readonly UpdateService _updates;
     private Contact? _current;
     // Изображения, выбранные для отправки (полоса над полем ввода).
     private readonly ObservableCollection<PendingAttachment> _attachments = new();
@@ -77,6 +78,11 @@ public partial class MainWindow : Window
 
         _chat.Start();
         _ = CheckFirewallAsync();
+
+        // Обновление ставится, только когда окно свёрнуто в трей и ничего не прервётся.
+        _updates = new UpdateService(_chat,
+            () => !IsVisible && !_games.HasActiveGames && !_chat.HasTransfersInProgress,
+            ExitApplication);
 
         Activated += (_, _) =>
         {
@@ -214,6 +220,10 @@ public partial class MainWindow : Window
         if (_current != null)
             _notifications.CloseFor(_current);
     }
+
+    /// <summary>Программа только что обновилась по сети — сообщаем об этом в трее.</summary>
+    public void NotifyUpdated() =>
+        _tray.ShowHint("OfficeChat обновлён", $"Установлена версия {_updates.CurrentVersion}.");
 
     /// <summary>Настоящий выход (из меню трея или при завершении работы Windows).</summary>
     public void ExitApplication()
@@ -756,6 +766,7 @@ public partial class MainWindow : Window
     private void Settings_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(_settings.DisplayName, _settings.AutoStart) { Owner = this };
+        dialog.ShowVersion(_updates.CurrentVersion, _updates.CanShare);
         if (dialog.ShowDialog() != true) return;
 
         _settings.DisplayName = dialog.EnteredName;
@@ -906,6 +917,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _updates.Dispose();
         _games.LeaveAll();
         _games.Dispose();
         _notifications.CloseAll();

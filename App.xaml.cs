@@ -45,6 +45,8 @@ public partial class App : Application
 
     private void Start(StartupEventArgs e)
     {
+        // Перезапуск после обновления: ждём, пока закроется старая копия.
+        UpdateService.FinishRestart(e.Args);
         _singleInstance = new Mutex(true, InstanceMutexName, out var isFirst);
         _showWindowSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
         if (!isFirst)
@@ -81,6 +83,8 @@ public partial class App : Application
         // При автозапуске с Windows окно не показываем — программа сразу работает в трее.
         if (!e.Args.Contains(AutoStartService.TrayArgument))
             _mainWindow.Show();
+        if (e.Args.Contains(UpdateService.UpdatedArgument))
+            _mainWindow.NotifyUpdated();
         Log.Info("Запуск завершён");
 
         ThreadPool.RegisterWaitForSingleObject(_showWindowSignal,
