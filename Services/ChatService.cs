@@ -57,6 +57,9 @@ public sealed partial class ChatService : IDisposable
     /// <summary>Сообщение убрано из переписки (удалено у себя или собеседником) — убрать его и из всплывающих окон.</summary>
     public event Action<Contact, ChatMessage>? MessageRemoved;
 
+    /// <summary>Пришёл пакет напоминания (обрабатывает <see cref="ReminderService"/>).</summary>
+    public event Action<Contact, ChatPacket>? ReminderPacketReceived;
+
     /// <summary>Пришёл пакет обновления программы (обрабатывает <see cref="UpdateService"/>).</summary>
     public event Action<Contact, ChatPacket>? UpdatePacketReceived;
 
@@ -115,6 +118,17 @@ public sealed partial class ChatService : IDisposable
         _retryTimer.Start();
         _typingTimer.Start();
     }
+
+    /// <summary>История и прочие данные на диске (их же использует служба напоминаний).</summary>
+    public HistoryStore Store => _store;
+
+    public string MyName => _settings.DisplayName;
+
+    /// <summary>
+    /// Надёжно отправить служебный пакет: через очередь в базе, дойдёт, даже если собеседник
+    /// появится в сети после перезапуска.
+    /// </summary>
+    public void SendReliable(Guid peerId, ChatPacket packet) => EnqueuePacket(peerId, packet);
 
     /// <summary>Наша версия и система — для пакетов обнаружения (по ним коллеги находят обновление).</summary>
     public void SetUpdateInfo(string version, string platform, bool canShare)
@@ -369,17 +383,17 @@ public sealed partial class ChatService : IDisposable
     /// Отправляет текст контакту. Для «Все» — каждому, кто в сети, отдельным личным сообщением.
     /// Возвращает число получателей.
     /// </summary>
-    public int Send(Contact contact, string text, ChatMessage? replyTo = null)
+    public int Send(Contact contact, string text, ChatMessage? replyTo = null, bool quiet = false)
     {
         if (!contact.IsEveryone)
         {
-            Enqueue(contact, text, isBroadcast: false, replyTo);
+            Enqueue(contact, text, isBroadcast: false, replyTo, quiet);
             return 1;
         }
 
         var recipients = _contactsByPeer.Values.Where(c => c.IsOnline).ToList();
         foreach (var recipient in recipients)
-            Enqueue(recipient, text, isBroadcast: true);
+            Enqueue(recipient, text, isBroadcast: true, quiet: quiet);
         return recipients.Count;
     }
 
@@ -396,19 +410,20 @@ public sealed partial class ChatService : IDisposable
     /// Отправляет изображение (с необязательной подписью). Для «Все» — каждому, кто в сети,
     /// отдельной копией. Возвращает число получателей.
     /// </summary>
-    public int SendImage(Contact contact, byte[] data, string fileName, string caption, ChatMessage? replyTo = null)
+    public int SendImage(Contact contact, byte[] data, string fileName, string caption, ChatMessage? replyTo = null,
+        bool quiet = false)
     {
         var recipients = contact.IsEveryone
             ? _contactsByPeer.Values.Where(c => c.IsOnline).ToList()
             : new List<Contact> { contact };
         foreach (var recipient in recipients)
-            EnqueueImage(recipient, data, fileName, caption, contact.IsEveryone, replyTo);
+            EnqueueImage(recipient, data, fileName, caption, contact.IsEveryone, replyTo, quiet);
         Log.Info($"Изображение «{fileName}» ({data.Length / 1024} КБ) поставлено в очередь для {recipients.Count} получателей");
         return recipients.Count;
     }
 
     private void EnqueueImage(Contact contact, byte[] data, string fileName, string caption, bool isBroadcast,
-        ChatMessage? replyTo)
+        ChatMessage? replyTo, bool quiet)
     {
         var id = Guid.NewGuid();
         // У каждой копии свой файл: удаление одной переписки не трогает другие.
@@ -428,6 +443,7 @@ public sealed partial class ChatService : IDisposable
             ReplyToId = replyTo?.Id,
             ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(contact, replyTo),
             ReplyText = replyTo?.QuoteText ?? "",
+            IsQuiet = quiet,
         };
         Post(contact, message);
     }
@@ -437,7 +453,8 @@ public sealed partial class ChatService : IDisposable
     /// (в фоне — он может быть большим), чтобы его можно было отправить позже и открыть из истории.
     /// Для «Все» — каждому, кто в сети; копия файла при этом одна на всех. Возвращает число получателей.
     /// </summary>
-    public async Task<int> SendFileAsync(Contact contact, string sourcePath, string caption, ChatMessage? replyTo = null)
+    public async Task<int> SendFileAsync(Contact contact, string sourcePath, string caption, ChatMessage? replyTo = null,
+        bool quiet = false)
     {
         var recipients = contact.IsEveryone
             ? _contactsByPeer.Values.Where(c => c.IsOnline).ToList()
@@ -467,6 +484,7 @@ public sealed partial class ChatService : IDisposable
                 ReplyToId = replyTo?.Id,
                 ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(recipient, replyTo),
                 ReplyText = replyTo?.QuoteText ?? "",
+                IsQuiet = quiet,
             };
             Post(recipient, message);
         }
@@ -659,7 +677,8 @@ public sealed partial class ChatService : IDisposable
             _ = FlushAsync(contact);
     }
 
-    private ChatMessage Enqueue(Contact contact, string text, bool isBroadcast, ChatMessage? replyTo = null)
+    private ChatMessage Enqueue(Contact contact, string text, bool isBroadcast, ChatMessage? replyTo = null,
+        bool quiet = false)
     {
         var message = new ChatMessage
         {
@@ -673,6 +692,7 @@ public sealed partial class ChatService : IDisposable
             ReplyToId = replyTo?.Id,
             ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(contact, replyTo),
             ReplyText = replyTo?.QuoteText ?? "",
+            IsQuiet = quiet,
         };
         Post(contact, message);
         return message;
@@ -835,6 +855,7 @@ public sealed partial class ChatService : IDisposable
             Text = message.Text,
             SentAt = new DateTimeOffset(message.Timestamp),
             IsBroadcast = message.IsBroadcast,
+            Quiet = message.IsQuiet,
             FileName = message.FileName,
             ReplyToId = message.ReplyToId,
             // У себя автор цитаты — «Вы», а собеседнику нужно наше имя.
@@ -901,6 +922,11 @@ public sealed partial class ChatService : IDisposable
                 break;
             case ChatPacket.Delete:
                 ApplyDelete(conversation, packet);
+                break;
+            case ChatPacket.ReminderShare:
+            case ChatPacket.ReminderDelete:
+            case ChatPacket.ReminderDone:
+                ReminderPacketReceived?.Invoke(contact, packet);
                 break;
             case ChatPacket.UpdateRequest:
             case ChatPacket.UpdatePackage:
@@ -987,6 +1013,7 @@ public sealed partial class ChatService : IDisposable
             FileSize = fileSize,
             Timestamp = packet.SentAt.LocalDateTime,
             IsBroadcast = packet.IsBroadcast,
+            IsQuiet = packet.Quiet,
             ReplyToId = packet.ReplyToId,
             // Ответили на наше сообщение — подписываем цитату «Вы», а не нашим именем.
             ReplyAuthor = packet.ReplyToId is { } replyTo && IsMyMessage(contact, replyTo) ? MyReplyAuthor : packet.ReplyAuthor,

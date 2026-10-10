@@ -1,0 +1,59 @@
+<Window x:Class="OfficeChat.Views.ReminderEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OfficeChat — напоминание"
+        Width="500" SizeToContent="Height" ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        FocusManager.FocusedElement="{Binding ElementName=ReminderText}">
+    <StackPanel Margin="20">
+        <TextBlock x:Name="HeaderText" FontSize="15" FontWeight="SemiBold" />
+
+        <TextBlock Text="О чём напомнить" Margin="0,12,0,4" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <TextBox x:Name="ReminderText" FontSize="14" Padding="6,4" MinHeight="60" MaxHeight="140" AcceptsReturn="True"
+                 TextWrapping="Wrap" MaxLength="1000" VerticalScrollBarVisibility="Auto" />
+
+        <CheckBox x:Name="HasTimeBox" Margin="0,12,0,0" Content="Напомнить в определённое время" IsChecked="True"
+                  Checked="HasTime_Changed" Unchecked="HasTime_Changed" />
+        <StackPanel x:Name="TimePanel" Margin="0,6,0,0">
+            <StackPanel Orientation="Horizontal">
+                <DatePicker x:Name="DateBox" Width="140" />
+                <TextBox x:Name="TimeBox" Width="70" Margin="8,0,0,0" Padding="4,3" MaxLength="5"
+                         VerticalContentAlignment="Center" ToolTip="Время, например 14:30" />
+                <ComboBox x:Name="RepeatBox" Width="160" Margin="8,0,0,0" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                <Button Content="через 15 мин" Padding="8,2" FontSize="12" Margin="0,0,6,0" Tag="15" Click="Quick_Click" />
+                <Button Content="через час" Padding="8,2" FontSize="12" Margin="0,0,6,0" Tag="60" Click="Quick_Click" />
+                <Button Content="сегодня 17:00" Padding="8,2" FontSize="12" Margin="0,0,6,0" Tag="today17" Click="Quick_Click" />
+                <Button Content="завтра 9:00" Padding="8,2" FontSize="12" Tag="tomorrow9" Click="Quick_Click" />
+            </StackPanel>
+        </StackPanel>
+
+        <DockPanel Margin="0,14,0,0">
+            <Border x:Name="ImportanceChip" DockPanel.Dock="Right" CornerRadius="4" Padding="8,1" VerticalAlignment="Center">
+                <TextBlock x:Name="ImportanceText" FontSize="12" FontWeight="SemiBold" Foreground="White" />
+            </Border>
+            <TextBlock Text="Важность" FontSize="12" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+        </DockPanel>
+        <Slider x:Name="ImportanceSlider" Margin="0,6,0,0" Minimum="1" Maximum="5" TickFrequency="1"
+                IsSnapToTickEnabled="True" TickPlacement="BottomRight" Value="2" ValueChanged="Importance_Changed" />
+        <!-- Как будет выглядеть и что будет делать напоминание этой важности -->
+        <Border x:Name="Preview" Margin="0,6,0,0" CornerRadius="6" BorderThickness="1" Padding="10,6">
+            <TextBlock x:Name="BehaviorText" FontSize="12" TextWrapping="Wrap" Foreground="#374151" />
+        </Border>
+
+        <TextBlock x:Name="PeopleLabel" Text="Отправить также (у них напоминание появится на доске)" Margin="0,14,0,4"
+                   FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <Border x:Name="PeopleBorder" BorderBrush="#E2E5EA" BorderThickness="1" CornerRadius="6" MaxHeight="150">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="PeopleList" Margin="10,6" />
+            </ScrollViewer>
+        </Border>
+
+        <TextBlock x:Name="ErrorText" Foreground="#DC2626" FontSize="12" Margin="0,8,0,0" Visibility="Collapsed" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="OkButton" Width="110" Padding="0,4" IsDefault="True" Click="Ok_Click" />
+            <Button Content="Отмена" Width="90" Padding="0,4" Margin="8,0,0,0" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

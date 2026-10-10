@@ -55,6 +55,32 @@ public sealed class NotificationManager
         AddToStack(window);
     }
 
+    /// <summary>Сработавшее напоминание. Если его окно уже на экране — новое не открываем.</summary>
+    public void ShowReminder(Reminder reminder, ReminderService reminders, Action openBoard)
+    {
+        if (_windows.OfType<ReminderPopupWindow>().Any(w => w.Reminder == reminder && !w.IsClosing)) return;
+        var window = new ReminderPopupWindow(reminder);
+        window.DoneRequested += w => reminders.Complete(w.Reminder);
+        window.SnoozeRequested += (w, anchor) => SnoozeMenu.Show(anchor, w.Reminder, reminders);
+        window.OpenRequested += w =>
+        {
+            w.FadeOutAndClose();
+            openBoard();
+        };
+        window.Dismissed += w => reminders.Dismiss(w.Reminder);
+        AddToStack(window);
+    }
+
+    /// <summary>Закрыть окна напоминаний, на которые уже ответили (выполнено, отложено, удалено).</summary>
+    public void CloseAnsweredReminders(ReminderService reminders)
+    {
+        foreach (var window in _windows.OfType<ReminderPopupWindow>()
+                     .Where(w => !w.IsClosing && (!w.Reminder.IsAlerting || w.Reminder.IsDone ||
+                                                  !reminders.Reminders.Contains(w.Reminder)))
+                     .ToList())
+            window.FadeOutAndClose();
+    }
+
     private void AddToStack<T>(T window) where T : Window, IStackedPopup
     {
         window.SizeChanged += (_, _) => Layout();

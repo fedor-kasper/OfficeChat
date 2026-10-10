@@ -18,6 +18,7 @@
                       Visibility="{Binding CanEdit, Converter={StaticResource BoolToVisibility}}" />
             <MenuItem Header="Копировать текст" Click="CopyMessage_Click"
                       Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
+            <MenuItem Header="⏰ Напомнить об этом…" Click="RemindAbout_Click" />
             <Separator />
             <MenuItem Header="Удалить у себя" Click="DeleteForMe_Click" />
             <MenuItem Header="Удалить у всех" Click="DeleteForAll_Click"
@@ -32,6 +33,9 @@
                     <TextBlock Text="сообщение всем" FontSize="10" Margin="0,0,0,2"
                                Foreground="{StaticResource MutedTextBrush}"
                                Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock Text="🔕 тихое" FontSize="10" Margin="0,0,0,2"
+                               Foreground="{StaticResource MutedTextBrush}"
+                               Visibility="{Binding IsQuiet, Converter={StaticResource BoolToVisibility}}" />
                     <!-- В группе — кто написал -->
                     <TextBlock Text="{Binding SenderName}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,2"
                                Foreground="{StaticResource AccentBrush}"
@@ -170,6 +174,19 @@
                 </StackPanel>
             </Border>
 
+            <!-- Доска напоминаний; красный счётчик — просроченные и сработавшие -->
+            <Button x:Name="RemindersButton" DockPanel.Dock="Top" Margin="10,10,10,0" Padding="10,6"
+                    HorizontalContentAlignment="Stretch" Click="Reminders_Click">
+                <DockPanel>
+                    <Border x:Name="RemindersBadge" DockPanel.Dock="Right" MinWidth="20" Height="20" CornerRadius="10"
+                            Padding="6,0" Background="#EF4444" Visibility="Collapsed">
+                        <TextBlock x:Name="RemindersBadgeText" Foreground="White" FontSize="11" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="⏰ Напоминания" FontSize="14" VerticalAlignment="Center" />
+                </DockPanel>
+            </Button>
+
             <DockPanel DockPanel.Dock="Top" Margin="14,8,10,4">
                 <Button DockPanel.Dock="Right" Content="＋ Группа" Padding="8,1" FontSize="12"
                         ToolTip="Создать групповой чат" Click="CreateGroup_Click" />
@@ -233,6 +250,9 @@
                 </ListBox.ItemTemplate>
             </ListBox>
         </DockPanel>
+
+        <!-- Правая часть: доска напоминаний -->
+        <local:RemindersPanel x:Name="RemindersView" Grid.Column="1" Visibility="Collapsed" />
 
         <!-- Правая часть: заглушка, пока никто не выбран -->
         <StackPanel x:Name="EmptyPanel" Grid.Column="1"
@@ -341,9 +361,13 @@
                     <Button DockPanel.Dock="Left" Content="📎" Width="36" Margin="0,0,6,0" FontSize="16"
                             ToolTip="Прикрепить файл или изображение (также можно перетащить файлы в окно или вставить Ctrl+V)"
                             Click="Attach_Click" />
-                    <Button DockPanel.Dock="Right" Content="Отправить" Margin="8,0,0,0" Padding="16,0"
+                    <Button DockPanel.Dock="Right" Content="Отправить" Margin="6,0,0,0" Padding="16,0"
                             VerticalAlignment="Stretch" FontWeight="SemiBold" Style="{StaticResource FlatButton}"
                             Click="Send_Click" />
+                    <!-- Тихое сообщение: у получателя всплывёт маленькой полоской, без красной рамки -->
+                    <ToggleButton x:Name="QuietToggle" DockPanel.Dock="Right" Content="🔕" Width="38" Margin="6,0,0,0"
+                                  FontSize="15" FontFamily="Segoe UI Emoji" VerticalAlignment="Stretch"
+                                  ToolTip="Тихое сообщение: у получателя появится маленькое уведомление, а не окно с красной рамкой. Также Ctrl+Enter" />
                     <TextBox x:Name="InputBox" FontSize="14" Padding="6,5" MinHeight="34" MaxHeight="120"
                              AcceptsReturn="True" TextWrapping="Wrap" MaxLength="4000"
                              VerticalScrollBarVisibility="Auto"

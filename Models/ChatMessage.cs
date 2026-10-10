@@ -167,6 +167,12 @@ public sealed class ChatMessage : INotifyPropertyChanged
     /// <summary>Сообщение было отправлено «Всем», а не лично.</summary>
     public bool IsBroadcast { get; init; }
 
+    /// <summary>
+    /// Тихое сообщение (пониженной важности): у получателя всплывает маленькой полоской,
+    /// а не полным окном с красной рамкой.
+    /// </summary>
+    public bool IsQuiet { get; init; }
+
     // ---- Ответ, правка ----
 
     /// <summary>На какое сообщение это ответ (null — не ответ).</summary>

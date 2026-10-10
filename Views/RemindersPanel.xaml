@@ -1,0 +1,92 @@
+<UserControl x:Class="OfficeChat.Views.RemindersPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:OfficeChat.Views">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <local:ColorBrushConverter x:Key="Brush" />
+        <Style x:Key="Tab" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="＋ Новое напоминание" Padding="12,5" FontSize="13"
+                        Style="{StaticResource FlatButton}" Click="New_Click" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="⏰ Напоминания" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
+                               Margin="0,0,12,0" />
+                    <Button x:Name="ActiveTab" Style="{StaticResource Tab}" Margin="0,0,6,0" Click="ActiveTab_Click" />
+                    <Button x:Name="DoneTab" Style="{StaticResource Tab}" Click="DoneTab_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="List" Margin="14,10">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Карточка: полоска и фон — цвет важности -->
+                            <Border x:Name="Card" Margin="0,4" CornerRadius="8" BorderThickness="1"
+                                    Background="{Binding Tint, Converter={StaticResource Brush}}"
+                                    BorderBrush="{Binding Color, Converter={StaticResource Brush}}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Left" Width="6" CornerRadius="7,0,0,7"
+                                            Background="{Binding Color, Converter={StaticResource Brush}}" />
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8" VerticalAlignment="Top">
+                                        <Button Content="✓ Готово" Padding="10,3" FontSize="12" Margin="0,0,4,0"
+                                                Style="{StaticResource FlatButton}" Background="#16A34A" Click="Done_Click"
+                                                Visibility="{Binding IsActive, Converter={StaticResource BoolToVisibility}}" />
+                                        <Button Content="↩ Вернуть" Padding="10,3" FontSize="12" Margin="0,0,4,0" Click="Reopen_Click"
+                                                Visibility="{Binding IsDone, Converter={StaticResource BoolToVisibility}}" />
+                                        <Button Content="⏱ Отложить" Padding="10,3" FontSize="12" Margin="0,0,4,0" Click="Snooze_Click" />
+                                        <Button Content="✎" Padding="8,3" FontSize="12" Margin="0,0,4,0" ToolTip="Изменить"
+                                                Visibility="{Binding IsMine, Converter={StaticResource BoolToVisibility}}" Click="Edit_Click" />
+                                        <Button Content="🗑" Padding="8,3" FontSize="12" ToolTip="Удалить" Click="Delete_Click" />
+                                    </StackPanel>
+                                    <StackPanel Margin="12,8,4,8">
+                                        <TextBlock Text="{Binding Text}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                   Foreground="#111827" />
+                                        <WrapPanel Margin="0,3,0,0">
+                                            <Border CornerRadius="4" Padding="6,0" Margin="0,0,8,0" VerticalAlignment="Center"
+                                                    Background="{Binding Color, Converter={StaticResource Brush}}">
+                                                <TextBlock Text="{Binding ImportanceName}" FontSize="11" Foreground="White" />
+                                            </Border>
+                                            <TextBlock x:Name="DueText" Text="{Binding DueText, StringFormat='⏰ {0}'}" FontSize="12"
+                                                       Margin="0,0,8,0" Foreground="#4B5563" />
+                                            <TextBlock Text="{Binding RepeatText}" FontSize="12" Foreground="#4B5563" Margin="0,0,8,0"
+                                                       Visibility="{Binding HasRepeat, Converter={StaticResource BoolToVisibility}}" />
+                                            <TextBlock Text="{Binding FromText}" FontSize="12" Foreground="#6B7280"
+                                                       Visibility="{Binding IsFromOther, Converter={StaticResource BoolToVisibility}}" />
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding ParticipantsText, StringFormat='👥 {0}'}" FontSize="12" Margin="0,3,0,0"
+                                                   Foreground="#4B5563" TextWrapping="Wrap"
+                                                   Visibility="{Binding HasParticipants, Converter={StaticResource BoolToVisibility}}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsOverdue}" Value="True">
+                                    <Setter TargetName="DueText" Property="Foreground" Value="#DC2626" />
+                                    <Setter TargetName="DueText" Property="FontWeight" Value="SemiBold" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsDone}" Value="True">
+                                    <Setter TargetName="Card" Property="Opacity" Value="0.7" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                       TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
+                       IsHitTestVisible="False" />
+        </Grid>
+    </DockPanel>
+</UserControl>
