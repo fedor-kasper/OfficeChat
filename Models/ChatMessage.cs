@@ -21,9 +21,11 @@ public enum MessageKind
     Image = 2,
     /// <summary>Файл любого типа; <see cref="ChatMessage.Text"/> — подпись (может быть пустой).</summary>
     File = 3,
+    /// <summary>Служебная запись группы («создал группу», «вышел» и т. п.) — по сети не передаётся.</summary>
+    Service = 4,
 }
 
-/// <summary>Одно сообщение в личной переписке (входящее или исходящее).</summary>
+/// <summary>Одно сообщение в личной переписке или группе (входящее или исходящее).</summary>
 public sealed class ChatMessage : INotifyPropertyChanged
 {
     private MessageStatus _status;
@@ -54,6 +56,49 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public MessageKind Kind { get; init; }
 
     public bool IsGame => Kind == MessageKind.Game;
+
+    public bool IsService => Kind == MessageKind.Service;
+
+    /// <summary>Запись, которую делает сама программа (итог игры, события группы), а не человек.</summary>
+    public bool IsSystem => IsGame || IsService;
+
+    // ---- Группы ----
+
+    /// <summary>Кто прислал сообщение в группу (для личной переписки — null).</summary>
+    public Guid? SenderId { get; init; }
+
+    /// <summary>Имя автора сообщения в группе.</summary>
+    public string SenderName { get; init; } = "";
+
+    /// <summary>Подписывать ли пузырёк именем автора (входящие в группе).</summary>
+    public bool ShowSender => !IsOutgoing && SenderName.Length > 0 && !IsSystem;
+
+    /// <summary>Своё сообщение в группе: скольким участникам оно адресовано (0 — личное сообщение).</summary>
+    public int RecipientCount { get; set; }
+
+    public bool IsGroupOutgoing => IsOutgoing && RecipientCount > 0;
+
+    /// <summary>Скольким участникам группы сообщение уже доставлено.</summary>
+    public int DeliveredCount
+    {
+        get => _deliveredCount;
+        set
+        {
+            if (Set(ref _deliveredCount, value)) OnStatusChanged();
+        }
+    }
+    private int _deliveredCount;
+
+    /// <summary>Сколько участников группы его прочитали.</summary>
+    public int ReadCount
+    {
+        get => _readCount;
+        set
+        {
+            if (Set(ref _readCount, value)) OnStatusChanged();
+        }
+    }
+    private int _readCount;
 
     public bool IsImage => Kind == MessageKind.Image;
 
@@ -105,7 +150,7 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public bool HasText => !string.IsNullOrEmpty(Text);
 
     /// <summary>В тексте есть ссылки — показываем его с кликабельными ссылками.</summary>
-    public bool HasLinks => _hasLinks ??= !IsGame && Services.LinkParser.ContainsLink(Text);
+    public bool HasLinks => _hasLinks ??= !IsSystem && Services.LinkParser.ContainsLink(Text);
     private bool? _hasLinks;
 
     /// <summary>Текст без ссылок — показываем как обычно (с выделением).</summary>
@@ -147,14 +192,14 @@ public sealed class ChatMessage : INotifyPropertyChanged
     }
     private bool _isEdited;
 
-    /// <summary>Ответить можно на любое сообщение, кроме служебной записи об игре.</summary>
-    public bool CanReply => !IsGame;
+    /// <summary>Ответить можно на любое сообщение, кроме служебных записей.</summary>
+    public bool CanReply => !IsSystem;
 
     /// <summary>Изменить можно свой текст или подпись к вложению.</summary>
-    public bool CanEdit => IsOutgoing && !IsGame;
+    public bool CanEdit => IsOutgoing && !IsSystem;
 
     /// <summary>Удалить у собеседника можно только своё сообщение.</summary>
-    public bool CanDeleteForEveryone => IsOutgoing && !IsGame;
+    public bool CanDeleteForEveryone => IsOutgoing && !IsSystem;
 
     /// <summary>Короткая цитата для ответа: начало текста или описание вложения.</summary>
     public string QuoteText
@@ -175,10 +220,14 @@ public sealed class ChatMessage : INotifyPropertyChanged
         get => _status;
         set
         {
-            if (!Set(ref _status, value)) return;
-            OnPropertyChanged(nameof(StatusText));
-            OnPropertyChanged(nameof(CanCancel));
+            if (Set(ref _status, value)) OnStatusChanged();
         }
+    }
+
+    private void OnStatusChanged()
+    {
+        OnPropertyChanged(nameof(StatusText));
+        OnPropertyChanged(nameof(CanCancel));
     }
 
     /// <summary>Для сообщения в очереди: true — адресат не в сети, false — сеть есть, но отправка не удалась.</summary>
@@ -204,10 +253,10 @@ public sealed class ChatMessage : INotifyPropertyChanged
     }
     private string _failureHint = "";
 
-    /// <summary>Отменить можно только то, что ещё не ушло адресату.</summary>
-    public bool CanCancel => IsOutgoing && Status == MessageStatus.Queued;
+    /// <summary>Отменить можно только то, что ещё не ушло адресату (в группе — ни одному участнику).</summary>
+    public bool CanCancel => IsOutgoing && Status == MessageStatus.Queued && DeliveredCount == 0;
 
-    public string StatusText => !IsOutgoing ? "" : Status switch
+    public string StatusText => !IsOutgoing ? "" : IsGroupOutgoing ? GroupStatusText : Status switch
     {
         MessageStatus.Queued => PeerOffline
             ? "⏳ Адресат не в сети — отправится, когда он появится"
@@ -220,6 +269,18 @@ public sealed class ChatMessage : INotifyPropertyChanged
         MessageStatus.Delivered => "✓ Доставлено",
         MessageStatus.Read => "✓✓ Прочитано",
         _ => "",
+    };
+
+    private string GroupStatusText => Status switch
+    {
+        MessageStatus.Sending => TransferProgress > 0 && TransferProgress < 1
+            ? $"Отправляется… {TransferProgress:0%}"
+            : "Отправляется…",
+        _ when ReadCount >= RecipientCount => "✓✓ Прочитано всеми",
+        _ when ReadCount > 0 => $"✓✓ Прочитали {ReadCount} из {RecipientCount}",
+        _ when DeliveredCount >= RecipientCount => "✓ Доставлено",
+        _ when DeliveredCount > 0 => $"✓ Доставлено {DeliveredCount} из {RecipientCount}",
+        _ => "⏳ Участники не в сети — отправится, когда появятся",
     };
 
     // ---- Входящие ----

@@ -1,5 +1,6 @@
 using System.IO;
 using System.Net;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using OfficeChat.Models;
 
@@ -66,6 +67,9 @@ public sealed class HistoryStore : IDisposable
         AddColumnIfMissing("reply_author", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("reply_text", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("edited", "INTEGER NOT NULL DEFAULT 0");
+        // Группы: кто автор входящего сообщения.
+        AddColumnIfMissing("sender_id", "TEXT NOT NULL DEFAULT ''");
+        AddColumnIfMissing("sender_name", "TEXT NOT NULL DEFAULT ''");
 
         Execute("""
             CREATE TABLE IF NOT EXISTS outbox (
@@ -73,6 +77,21 @@ public sealed class HistoryStore : IDisposable
                 peer_id TEXT NOT NULL,
                 packet  TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS groups (
+                id      TEXT PRIMARY KEY,
+                name    TEXT NOT NULL,
+                members TEXT NOT NULL
+            );
+            -- Доставка своих сообщений в группе каждому участнику: 0 — ждёт, 1 — доставлено, 2 — прочитано.
+            CREATE TABLE IF NOT EXISTS group_receipts (
+                message_id TEXT NOT NULL,
+                peer_id    TEXT NOT NULL,
+                state      INTEGER NOT NULL,
+                PRIMARY KEY (message_id, peer_id)
+            );
+            CREATE INDEX IF NOT EXISTS ix_group_receipts_peer ON group_receipts (peer_id, state);
+            -- Группы, из которых мы вышли: их пакеты больше не принимаем.
+            CREATE TABLE IF NOT EXISTS left_groups (id TEXT PRIMARY KEY);
             """);
     }
 
@@ -114,6 +133,139 @@ public sealed class HistoryStore : IDisposable
         using var cmd = Command("DELETE FROM contacts WHERE id = $peer");
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
         cmd.ExecuteNonQuery();
+    }
+
+    // ---- Группы ----
+
+    public List<ChatGroup> LoadGroups()
+    {
+        using var cmd = Command("SELECT id, name, members FROM groups");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<ChatGroup>();
+        while (reader.Read())
+        {
+            result.Add(new ChatGroup
+            {
+                Id = Guid.Parse(reader.GetString(0)),
+                Name = reader.GetString(1),
+                Members = JsonSerializer.Deserialize<List<GroupMember>>(reader.GetString(2)) ?? new(),
+            });
+        }
+        return result;
+    }
+
+    public void SaveGroup(ChatGroup group)
+    {
+        using var cmd = Command("""
+            INSERT INTO groups (id, name, members) VALUES ($id, $name, $members)
+            ON CONFLICT (id) DO UPDATE SET name = $name, members = $members
+            """);
+        cmd.Parameters.AddWithValue("$id", group.Id.ToString());
+        cmd.Parameters.AddWithValue("$name", group.Name);
+        cmd.Parameters.AddWithValue("$members", JsonSerializer.Serialize(group.Members));
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Выход из группы: удаляем её с перепиской и запоминаем, чтобы не принимать её пакеты.</summary>
+    public void LeaveGroup(Guid groupId)
+    {
+        DeleteConversation(groupId);
+        using var cmd = Command("""
+            DELETE FROM groups WHERE id = $id;
+            INSERT OR IGNORE INTO left_groups (id) VALUES ($id);
+            """);
+        cmd.Parameters.AddWithValue("$id", groupId.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Нас снова позвали в группу, из которой мы выходили.</summary>
+    public void ForgetLeftGroup(Guid groupId)
+    {
+        using var cmd = Command("DELETE FROM left_groups WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", groupId.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool HasLeftGroup(Guid groupId)
+    {
+        using var cmd = Command("SELECT 1 FROM left_groups WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", groupId.ToString());
+        return cmd.ExecuteScalar() != null;
+    }
+
+    /// <summary>Своё сообщение в группе ждёт доставки каждому из этих участников.</summary>
+    public void AddReceipts(Guid messageId, IEnumerable<Guid> peerIds)
+    {
+        using var tx = _db.BeginTransaction();
+        using var cmd = Command("INSERT OR IGNORE INTO group_receipts (message_id, peer_id, state) VALUES ($msg, $peer, 0)");
+        cmd.Transaction = tx;
+        cmd.Parameters.AddWithValue("$msg", messageId.ToString());
+        var peer = cmd.Parameters.Add("$peer", SqliteType.Text);
+        foreach (var id in peerIds)
+        {
+            peer.Value = id.ToString();
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    /// <summary>Отметка «доставлено» (1) или «прочитано» (2) от участника. Только повышает состояние.</summary>
+    public void SetReceipt(Guid messageId, Guid peerId, int state)
+    {
+        using var cmd = Command(
+            "UPDATE group_receipts SET state = $state WHERE message_id = $msg AND peer_id = $peer AND state < $state");
+        cmd.Parameters.AddWithValue("$msg", messageId.ToString());
+        cmd.Parameters.AddWithValue("$peer", peerId.ToString());
+        cmd.Parameters.AddWithValue("$state", state);
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Скольким участникам адресовано, доставлено и прочитано своё сообщение в группе.</summary>
+    public (int Total, int Delivered, int Read) ReceiptCounts(Guid messageId)
+    {
+        using var cmd = Command("""
+            SELECT count(*), coalesce(sum(state >= 1), 0), coalesce(sum(state >= 2), 0)
+            FROM group_receipts WHERE message_id = $msg
+            """);
+        cmd.Parameters.AddWithValue("$msg", messageId.ToString());
+        using var reader = cmd.ExecuteReader();
+        reader.Read();
+        return (reader.GetInt32(0), reader.GetInt32(1), reader.GetInt32(2));
+    }
+
+    /// <summary>Участники, до которых сообщение уже дошло (им нужно отправлять правку или удаление).</summary>
+    public List<Guid> DeliveredTo(Guid messageId)
+    {
+        using var cmd = Command("SELECT peer_id FROM group_receipts WHERE message_id = $msg AND state >= 1");
+        cmd.Parameters.AddWithValue("$msg", messageId.ToString());
+        using var reader = cmd.ExecuteReader();
+        var result = new List<Guid>();
+        while (reader.Read()) result.Add(Guid.Parse(reader.GetString(0)));
+        return result;
+    }
+
+    /// <summary>Свои сообщения в группах, ещё не доставленные этому участнику, — по порядку.</summary>
+    public List<(Guid MessageId, Guid GroupId)> PendingGroupDeliveries(Guid peerId)
+    {
+        using var cmd = Command("""
+            SELECT r.message_id, m.peer_id FROM group_receipts r JOIN messages m ON m.id = r.message_id
+            WHERE r.peer_id = $peer AND r.state = 0 ORDER BY m.timestamp
+            """);
+        cmd.Parameters.AddWithValue("$peer", peerId.ToString());
+        using var reader = cmd.ExecuteReader();
+        var result = new List<(Guid, Guid)>();
+        while (reader.Read()) result.Add((Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1))));
+        return result;
+    }
+
+    /// <summary>Участники, которым ещё есть что доставить из групп.</summary>
+    public List<Guid> PeersWithPendingGroupDeliveries()
+    {
+        using var cmd = Command("SELECT DISTINCT peer_id FROM group_receipts WHERE state = 0");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<Guid>();
+        while (reader.Read()) result.Add(Guid.Parse(reader.GetString(0)));
+        return result;
     }
 
     // ---- Сообщения ----
@@ -162,9 +314,10 @@ public sealed class HistoryStore : IDisposable
     {
         using var cmd = Command("""
             INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind,
-                                  file_name, file_path, file_size, reply_to, reply_author, reply_text, edited)
+                                  file_name, file_path, file_size, reply_to, reply_author, reply_text, edited,
+                                  sender_id, sender_name)
             VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
-                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited)
+                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt,
                                            text = $text, edited = $edited
             """);
@@ -185,6 +338,8 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$replyAuthor", message.ReplyAuthor);
         cmd.Parameters.AddWithValue("$replyText", message.ReplyText);
         cmd.Parameters.AddWithValue("$edited", message.IsEdited);
+        cmd.Parameters.AddWithValue("$senderId", message.SenderId?.ToString() ?? "");
+        cmd.Parameters.AddWithValue("$senderName", message.SenderName);
         cmd.ExecuteNonQuery();
     }
 
@@ -251,7 +406,7 @@ public sealed class HistoryStore : IDisposable
 
     public void DeleteMessage(Guid id)
     {
-        using var cmd = Command("DELETE FROM messages WHERE id = $id");
+        using var cmd = Command("DELETE FROM messages WHERE id = $id; DELETE FROM group_receipts WHERE message_id = $id");
         cmd.Parameters.AddWithValue("$id", id.ToString());
         cmd.ExecuteNonQuery();
     }
@@ -280,7 +435,10 @@ public sealed class HistoryStore : IDisposable
             while (reader.Read()) files.Add(reader.GetString(0));
         }
 
-        using var cmd = Command("DELETE FROM messages WHERE peer_id = $peer");
+        using var cmd = Command("""
+            DELETE FROM group_receipts WHERE message_id IN (SELECT id FROM messages WHERE peer_id = $peer);
+            DELETE FROM messages WHERE peer_id = $peer;
+            """);
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
         cmd.ExecuteNonQuery();
         foreach (var path in images)
@@ -302,9 +460,9 @@ public sealed class HistoryStore : IDisposable
 
     private const string MessageColumns =
         "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size, " +
-        "reply_to, reply_author, reply_text, edited";
+        "reply_to, reply_author, reply_text, edited, sender_id, sender_name";
 
-    private const int MessageColumnCount = 16;
+    private const int MessageColumnCount = 18;
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -322,6 +480,7 @@ public sealed class HistoryStore : IDisposable
         var kind = (MessageKind)reader.GetInt32(8);
         var fileName = reader.GetString(9);
         var replyTo = reader.GetString(12);
+        var senderId = reader.GetString(16);
         return new ChatMessage
         {
             Id = id,
@@ -342,6 +501,8 @@ public sealed class HistoryStore : IDisposable
             ReplyAuthor = reader.GetString(13),
             ReplyText = reader.GetString(14),
             IsEdited = reader.GetBoolean(15),
+            SenderId = senderId.Length > 0 ? Guid.Parse(senderId) : null,
+            SenderName = reader.GetString(17),
         };
     }
 

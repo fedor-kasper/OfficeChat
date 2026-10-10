@@ -32,6 +32,10 @@
                     <TextBlock Text="сообщение всем" FontSize="10" Margin="0,0,0,2"
                                Foreground="{StaticResource MutedTextBrush}"
                                Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVisibility}}" />
+                    <!-- В группе — кто написал -->
+                    <TextBlock Text="{Binding SenderName}" FontSize="12" FontWeight="SemiBold" Margin="0,0,0,2"
+                               Foreground="{StaticResource AccentBrush}"
+                               Visibility="{Binding ShowSender, Converter={StaticResource BoolToVisibility}}" />
                     <!-- Цитата: на какое сообщение это ответ; клик — показать оригинал -->
                     <Border Visibility="{Binding HasReply, Converter={StaticResource BoolToVisibility}}"
                             BorderBrush="{StaticResource AccentBrush}" BorderThickness="3,0,0,0" Background="#0D000000"
@@ -117,6 +121,11 @@
                 <DataTrigger Binding="{Binding CanCancel}" Value="True">
                     <Setter TargetName="Bubble" Property="Background" Value="#FFF1D6" />
                 </DataTrigger>
+                <!-- Событие группы («создал группу», «вышел»): по центру, неброско -->
+                <DataTrigger Binding="{Binding IsService}" Value="True">
+                    <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Center" />
+                    <Setter TargetName="Bubble" Property="Background" Value="#F3F4F6" />
+                </DataTrigger>
                 <!-- Итог мини-игры: по центру, отдельным цветом -->
                 <DataTrigger Binding="{Binding IsGame}" Value="True">
                     <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Center" />
@@ -161,8 +170,12 @@
                 </StackPanel>
             </Border>
 
-            <TextBlock DockPanel.Dock="Top" x:Name="OnlineCountText" Margin="14,10,14,4"
-                       FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+            <DockPanel DockPanel.Dock="Top" Margin="14,8,10,4">
+                <Button DockPanel.Dock="Right" Content="＋ Группа" Padding="8,1" FontSize="12"
+                        ToolTip="Создать групповой чат" Click="CreateGroup_Click" />
+                <TextBlock x:Name="OnlineCountText" FontSize="11" VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedTextBrush}" />
+            </DockPanel>
 
             <ListBox x:Name="ContactsList" BorderThickness="0" Background="Transparent"
                      HorizontalContentAlignment="Stretch"
@@ -205,7 +218,7 @@
                                 <Setter TargetName="TitleText" Property="Foreground"
                                         Value="{StaticResource MutedTextBrush}" />
                             </DataTrigger>
-                            <DataTrigger Binding="{Binding IsEveryone}" Value="True">
+                            <DataTrigger Binding="{Binding IsPerson}" Value="False">
                                 <Setter TargetName="Dot" Property="Fill" Value="{StaticResource AccentBrush}" />
                             </DataTrigger>
                             <!-- Без уведомлений: счётчик серый, не отвлекает -->
@@ -238,16 +251,21 @@
             <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
-                                Visibility="{Binding Peer, Converter={StaticResource NotNullToVisibility}}">
+                                Visibility="{Binding IsConversation, Converter={StaticResource BoolToVisibility}}">
                         <Button Content="🎮 Крестики-нолики" Padding="8,2" Margin="0,0,6,0"
                                 ToolTip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
-                                Visibility="{Binding IsOnline, Converter={StaticResource BoolToVisibility}}" />
+                                Visibility="{Binding CanInviteToGame, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Content="👥 Участники" Padding="8,2" Margin="0,0,6,0"
+                                ToolTip="Состав группы, добавить людей, переименовать" Click="GroupMembers_Click"
+                                Visibility="{Binding IsGroup, Converter={StaticResource BoolToVisibility}}" />
                         <Button x:Name="MuteButton" Padding="6,2" Margin="0,0,6,0" FontFamily="Segoe UI Emoji"
                                 Click="ToggleMute_Click" />
                         <Button Content="Очистить переписку" Padding="8,2" Click="ClearConversation_Click" />
                         <Button Content="Удалить из списка" Padding="8,2" Margin="6,0,0,0"
                                 Click="RemoveContact_Click"
                                 Visibility="{Binding CanRemove, Converter={StaticResource BoolToVisibility}}" />
+                        <Button Content="Выйти из группы" Padding="8,2" Margin="6,0,0,0" Click="LeaveGroup_Click"
+                                Visibility="{Binding IsGroup, Converter={StaticResource BoolToVisibility}}" />
                     </StackPanel>
                     <StackPanel>
                         <TextBlock x:Name="ChatTitleText" FontSize="16" FontWeight="SemiBold"

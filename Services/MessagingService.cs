@@ -308,6 +308,17 @@ public sealed class ChatPacket
     /// <summary>Отправитель удалил своё сообщение <see cref="TargetId"/> у всех.</summary>
     public const string Delete = "delete";
 
+    /// <summary>
+    /// Событие группы <see cref="GroupId"/>: <see cref="GroupAction"/> — создана, добавлены участники,
+    /// переименована или отправитель вышел. В пакете — актуальные название и состав.
+    /// </summary>
+    public const string GroupUpdate = "group";
+
+    public const string GroupCreated = "create";
+    public const string GroupMembersAdded = "add";
+    public const string GroupRenamed = "rename";
+    public const string GroupLeft = "leave";
+
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
@@ -351,6 +362,18 @@ public sealed class ChatPacket
 
     /// <summary>Сообщение, к которому относится правка или удаление.</summary>
     public Guid TargetId { get; set; }
+
+    /// <summary>
+    /// Группа, к которой относится пакет (сообщение, правка, «прочитано», «печатает…»). Пусто — личная переписка.
+    /// С каждым сообщением приходят название и состав — по ним группу можно создать, если её ещё нет.
+    /// </summary>
+    public Guid GroupId { get; set; }
+    public string GroupName { get; set; } = "";
+    public List<Models.GroupMember>? GroupMembers { get; set; }
+    public string GroupAction { get; set; } = "";
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool IsGroup => GroupId != Guid.Empty;
 
     public string FileName { get; set; } = "";
 

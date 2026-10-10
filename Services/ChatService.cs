@@ -11,7 +11,7 @@ namespace OfficeChat.Services;
 /// Логика чата поверх сети: список контактов, очередь неотправленных сообщений,
 /// статусы «доставлено/прочитано», повторные попытки, история. Работает в UI-потоке.
 /// </summary>
-public sealed class ChatService : IDisposable
+public sealed partial class ChatService : IDisposable
 {
     private static readonly TimeSpan RetryInterval = TimeSpan.FromSeconds(5);
 
@@ -40,7 +40,7 @@ public sealed class ChatService : IDisposable
     /// <summary>Как подписан автор цитаты, если ответили на ваше сообщение.</summary>
     public const string MyReplyAuthor = "Вы";
 
-    /// <summary>«Все» первым, затем компьютеры по алфавиту.</summary>
+    /// <summary>«Все» первым, затем группы и компьютеры по алфавиту.</summary>
     public ObservableCollection<Contact> Contacts { get; } = new();
 
     public Contact Everyone { get; } = Contact.Everyone();
@@ -67,7 +67,13 @@ public sealed class ChatService : IDisposable
     public Func<Contact, bool> IsConversationVisible { get; set; } = _ => false;
 
     /// <summary>Непрочитанные в переписках с включёнными уведомлениями — их показывает значок в трее.</summary>
-    public int TotalUnread => _contactsByPeer.Values.Where(c => !c.IsMuted).Sum(c => c.UnreadCount);
+    public int TotalUnread => Conversations.Where(c => !c.IsMuted).Sum(c => c.UnreadCount);
+
+    /// <summary>Все переписки: личные и групповые.</summary>
+    private IEnumerable<Contact> Conversations => _contactsByPeer.Values.Concat(_groups.Values);
+
+    /// <summary>Наш Id в сети.</summary>
+    public Guid MyId => _settings.UserId;
 
     /// <summary>TCP-порт, на котором принимаем сообщения.</summary>
     public int MessagingPort => _messaging.Port;
@@ -117,7 +123,7 @@ public sealed class ChatService : IDisposable
     {
         if (contact.IsEveryone || contact.IsMuted == muted) return;
         contact.IsMuted = muted;
-        var id = contact.Peer!.Id;
+        var id = contact.Key;
         _settings.MutedChats.Remove(id);
         if (muted) _settings.MutedChats.Add(id);
         SettingsService.Save(_settings);
@@ -133,18 +139,18 @@ public sealed class ChatService : IDisposable
     public void NotifyTyping(Contact contact)
     {
         if (contact.IsEveryone || !contact.IsOnline) return;
-        var id = contact.Peer!.Id;
+        var id = contact.Key;
         var now = DateTime.UtcNow;
         if (_typingSent.TryGetValue(id, out var last) && now - last < TypingSendInterval) return;
         _typingSent[id] = now;
-        _ = SendPacketAsync(contact, new ChatPacket { Type = ChatPacket.Typing, Id = Guid.NewGuid() });
+        if (contact.IsGroup)
+            NotifyGroupTyping(contact);
+        else
+            _ = SendPacketAsync(contact, new ChatPacket { Type = ChatPacket.Typing, Id = Guid.NewGuid() });
     }
 
     /// <summary>Сообщение ушло — следующее нажатие клавиши снова сообщит «печатает…».</summary>
-    private void ResetTypingSent(Contact contact)
-    {
-        if (contact.Peer != null) _typingSent.Remove(contact.Peer.Id);
-    }
+    private void ResetTypingSent(Contact contact) => _typingSent.Remove(contact.Key);
 
     private void ShowTyping(Contact contact, string text)
     {
@@ -157,7 +163,7 @@ public sealed class ChatService : IDisposable
     private void ExpireTyping()
     {
         var now = DateTime.UtcNow;
-        foreach (var contact in _contactsByPeer.Values.Where(c => c.IsTyping && c.TypingUntil < now))
+        foreach (var contact in Conversations.Where(c => c.IsTyping && c.TypingUntil < now))
             StopTyping(contact);
     }
 
@@ -186,6 +192,24 @@ public sealed class ChatService : IDisposable
             contact.UnreadCount = messages.Count(m => !m.IsOutgoing && !m.IsRead);
             RemoveIfForgotten(contact);
         }
+        LoadGroups();
+    }
+
+    /// <summary>Последние сообщения переписки и всё, с чем ещё есть работа (очередь, непрочитанные).</summary>
+    private void LoadMessages(Contact contact)
+    {
+        var recent = _store.LoadRecent(contact.Key, PageSize);
+        var pending = _store.LoadPending(contact.Key);
+        var messages = recent.Concat(pending.Where(p => recent.All(r => r.Id != p.Id)))
+            .OrderBy(m => m.Timestamp)
+            .ToList();
+        foreach (var message in messages)
+        {
+            if (contact.IsGroup) RefreshReceipts(message);
+            contact.Messages.Add(message);
+        }
+        contact.HasOlderMessages = recent.Count == PageSize;
+        contact.UnreadCount = messages.Count(m => !m.IsOutgoing && !m.IsRead);
     }
 
     /// <summary>Подгружает в окно следующую порцию более ранних сообщений.</summary>
@@ -193,11 +217,14 @@ public sealed class ChatService : IDisposable
     {
         if (contact.IsEveryone || contact.Messages.Count == 0) return;
 
-        var older = _store.LoadRecent(contact.Peer!.Id, PageSize, contact.Messages[0].Timestamp);
+        var older = _store.LoadRecent(contact.Key, PageSize, contact.Messages[0].Timestamp);
         var loaded = contact.Messages.Select(m => m.Id).ToHashSet();
         var index = 0;
         foreach (var message in older.Where(m => !loaded.Contains(m.Id)))
+        {
+            if (contact.IsGroup) RefreshReceipts(message);
             contact.Messages.Insert(index++, message);
+        }
         contact.HasOlderMessages = older.Count == PageSize;
     }
 
@@ -206,7 +233,7 @@ public sealed class ChatService : IDisposable
     {
         if (contact.IsEveryone) return;
 
-        _store.DeleteConversation(contact.Peer!.Id);
+        _store.DeleteConversation(contact.Key);
         contact.Messages.Clear();
         contact.HasOlderMessages = false;
         if (contact.UnreadCount != 0)
@@ -299,7 +326,25 @@ public sealed class ChatService : IDisposable
     {
         // Сообщение могли удалить (очистка переписки), пока шла отправка, — не воскрешаем его.
         if (contact.Messages.Contains(message))
-            _store.SaveMessage(contact.Peer!.Id, message);
+            _store.SaveMessage(contact.Key, message);
+    }
+
+    /// <summary>
+    /// Добавляет своё новое сообщение в переписку, сохраняет и запускает отправку:
+    /// собеседнику — из очереди переписки, в группе — каждому участнику отдельно.
+    /// </summary>
+    private void Post(Contact contact, ChatMessage message)
+    {
+        contact.Messages.Add(message);
+        ResetTypingSent(contact);
+        if (contact.IsGroup)
+        {
+            PostToGroup(contact, message);
+            return;
+        }
+        _store.SaveContact(contact.Peer!);
+        Save(contact, message);
+        _ = FlushAsync(contact);
     }
 
     // ---- Отправка ----
@@ -368,10 +413,7 @@ public sealed class ChatService : IDisposable
             ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(contact, replyTo),
             ReplyText = replyTo?.QuoteText ?? "",
         };
-        contact.Messages.Add(message);
-        _store.SaveContact(contact.Peer!);
-        Save(contact, message);
-        _ = FlushAsync(contact);
+        Post(contact, message);
     }
 
     /// <summary>
@@ -410,10 +452,7 @@ public sealed class ChatService : IDisposable
                 ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(recipient, replyTo),
                 ReplyText = replyTo?.QuoteText ?? "",
             };
-            recipient.Messages.Add(message);
-            _store.SaveContact(recipient.Peer!);
-            Save(recipient, message);
-            _ = FlushAsync(recipient);
+            Post(recipient, message);
         }
         Log.Info($"Файл «{fileName}» ({size / 1024} КБ) поставлен в очередь для {recipients.Count} получателей");
         return recipients.Count;
@@ -430,7 +469,7 @@ public sealed class ChatService : IDisposable
     public bool Cancel(ChatMessage message)
     {
         if (!message.CanCancel) return false;
-        var contact = _contactsByPeer.Values.FirstOrDefault(c => c.Messages.Contains(message));
+        var contact = Conversations.FirstOrDefault(c => c.Messages.Contains(message));
         if (contact == null) return false;
 
         RemoveMessage(contact, message);
@@ -449,6 +488,17 @@ public sealed class ChatService : IDisposable
         if (message.Text == newText || (message.Kind == MessageKind.Text && newText.Length == 0)) return false;
 
         message.Text = newText;
+        if (contact.IsGroup)
+        {
+            // Тем, кому сообщение ещё не ушло, оно уйдёт уже с новым текстом; остальным — правка.
+            var deliveredTo = _store.DeliveredTo(message.Id);
+            if (deliveredTo.Count > 0) message.IsEdited = true;
+            Save(contact, message);
+            foreach (var peerId in deliveredTo)
+                EnqueueEdit(peerId, message, contact.Key);
+            Log.Info($"Сообщение {message.Id} в группе изменено");
+            return true;
+        }
         // Пока сообщение не ушло, правка незаметна для собеседника — и пометка «изменено» не нужна.
         if (message.Status != MessageStatus.Queued) message.IsEdited = true;
         Save(contact, message);
@@ -459,13 +509,14 @@ public sealed class ChatService : IDisposable
         return true;
     }
 
-    private void EnqueueEdit(Guid peerId, ChatMessage message) =>
+    private void EnqueueEdit(Guid peerId, ChatMessage message, Guid groupId = default) =>
         EnqueuePacket(peerId, new ChatPacket
         {
             Type = ChatPacket.Edit,
             Id = Guid.NewGuid(),
             TargetId = message.Id,
             Text = message.Text,
+            GroupId = groupId,
         });
 
     /// <summary>
@@ -476,16 +527,24 @@ public sealed class ChatService : IDisposable
     {
         if (contact.IsEveryone || !contact.Messages.Contains(message)) return;
 
-        var reachedPeer = message.IsOutgoing && message.Status != MessageStatus.Queued;
+        // Кому сообщение уже дошло — им и отправлять удаление (в группе считаем до того, как сотрём отметки доставки).
+        var reachedPeers = !message.IsOutgoing ? new List<Guid>()
+            : contact.IsGroup ? _store.DeliveredTo(message.Id)
+            : message.Status != MessageStatus.Queued ? new List<Guid> { contact.Peer!.Id }
+            : new List<Guid>();
         RemoveMessage(contact, message);
-        if (forEveryone && message.CanDeleteForEveryone && reachedPeer)
+        if (forEveryone && message.CanDeleteForEveryone)
         {
-            EnqueuePacket(contact.Peer!.Id, new ChatPacket
+            foreach (var peerId in reachedPeers)
             {
-                Type = ChatPacket.Delete,
-                Id = Guid.NewGuid(),
-                TargetId = message.Id,
-            });
+                EnqueuePacket(peerId, new ChatPacket
+                {
+                    Type = ChatPacket.Delete,
+                    Id = Guid.NewGuid(),
+                    TargetId = message.Id,
+                    GroupId = contact.IsGroup ? contact.Key : Guid.Empty,
+                });
+            }
         }
         Log.Info($"Сообщение {message.Id} удалено {(forEveryone ? "у всех" : "у себя")}");
     }
@@ -506,21 +565,21 @@ public sealed class ChatService : IDisposable
         RemoveIfForgotten(contact);
     }
 
-    /// <summary>Собеседник изменил своё сообщение.</summary>
+    /// <summary>Собеседник изменил своё сообщение (в личной переписке или в группе).</summary>
     private void ApplyEdit(Contact contact, ChatPacket packet)
     {
-        var message = FindIncoming(contact, packet.TargetId);
+        var message = FindIncoming(contact, packet.TargetId, packet.From);
         if (message == null) return;
         StopTyping(contact);
         message.Text = packet.Text;
         message.IsEdited = true;
-        _store.SaveMessage(contact.Peer!.Id, message);
+        _store.SaveMessage(contact.Key, message);
     }
 
     /// <summary>Собеседник удалил своё сообщение у всех.</summary>
     private void ApplyDelete(Contact contact, ChatPacket packet)
     {
-        var message = FindIncoming(contact, packet.TargetId);
+        var message = FindIncoming(contact, packet.TargetId, packet.From);
         if (message == null) return;
         if (contact.Messages.Contains(message))
         {
@@ -534,14 +593,16 @@ public sealed class ChatService : IDisposable
     }
 
     /// <summary>
-    /// Входящее сообщение этого собеседника: загруженное в окно или из базы.
-    /// Чужие и свои сообщения так не найти — править и удалять можно только то, что прислал сам собеседник.
+    /// Входящее сообщение от <paramref name="senderId"/> в этой переписке: загруженное в окно или из базы.
+    /// Чужие и свои сообщения так не найти — править и удалять можно только то, что прислал сам автор.
     /// </summary>
-    private ChatMessage? FindIncoming(Contact contact, Guid id)
+    private ChatMessage? FindIncoming(Contact contact, Guid id, Guid senderId)
     {
+        bool IsFromSender(ChatMessage m) => !m.IsOutgoing && !m.IsSystem && (!contact.IsGroup || m.SenderId == senderId);
+
         var loaded = contact.Messages.FirstOrDefault(m => m.Id == id);
-        if (loaded != null) return loaded.IsOutgoing ? null : loaded;
-        return _store.LoadMessage(id) is { } stored && stored.PeerId == contact.Peer!.Id && !stored.Message.IsOutgoing
+        if (loaded != null) return IsFromSender(loaded) ? loaded : null;
+        return _store.LoadMessage(id) is { } stored && stored.PeerId == contact.Key && IsFromSender(stored.Message)
             ? stored.Message
             : null;
     }
@@ -559,6 +620,11 @@ public sealed class ChatService : IDisposable
     public void MarkRead(Contact contact)
     {
         if (contact.IsEveryone) return;
+        if (contact.IsGroup)
+        {
+            MarkGroupRead(contact);
+            return;
+        }
 
         var changed = false;
         foreach (var message in contact.Messages.Where(m => !m.IsOutgoing && !m.IsRead))
@@ -592,21 +658,20 @@ public sealed class ChatService : IDisposable
             ReplyAuthor = replyTo == null ? "" : ReplyAuthorOf(contact, replyTo),
             ReplyText = replyTo?.QuoteText ?? "",
         };
-        contact.Messages.Add(message);
-        _store.SaveContact(contact.Peer!);
-        Save(contact, message);
-        ResetTypingSent(contact);
-        _ = FlushAsync(contact);
+        Post(contact, message);
         return message;
     }
 
-    /// <summary>Как подписать автора цитаты у себя: «Вы» или имя собеседника.</summary>
+    /// <summary>Как подписать автора цитаты у себя: «Вы», автор сообщения в группе или имя собеседника.</summary>
     private static string ReplyAuthorOf(Contact contact, ChatMessage original) =>
-        original.IsOutgoing ? MyReplyAuthor : contact.Title;
+        original.IsOutgoing ? MyReplyAuthor : original.SenderName.Length > 0 ? original.SenderName : contact.Title;
 
     private void FlushAll()
     {
-        foreach (var peerId in _contactsByPeer.Keys.Concat(_outbox.Select(o => o.PeerId)).Distinct().ToList())
+        foreach (var peerId in _contactsByPeer.Keys
+                     .Concat(_outbox.Select(o => o.PeerId))
+                     .Concat(_store.PeersWithPendingGroupDeliveries())
+                     .Distinct().ToList())
             _ = FlushAsync(peerId);
     }
 
@@ -623,14 +688,16 @@ public sealed class ChatService : IDisposable
         if (peer == null) return;
         var hasWork = _outbox.Any(o => o.PeerId == peerId) || (contact != null && contact.Messages.Any(m =>
             (m.IsOutgoing && m.Status == MessageStatus.Queued) ||
-            (!m.IsOutgoing && m.IsRead && !m.ReadReceiptSent)));
+            (!m.IsOutgoing && m.IsRead && !m.ReadReceiptSent))) || _store.PendingGroupDeliveries(peerId).Count > 0;
         if (!hasWork || peer.Address.Equals(IPAddress.None) || !_flushing.Add(peer.Id)) return;
         // Даже если обнаружение считает собеседника ушедшим, пробуем напрямую по последнему адресу:
         // UDP-рассылку может резать брандмауэр, а TCP при этом работать.
         try
         {
             if (contact != null && !await FlushMessagesAsync(contact, peer)) return;
-            await FlushOutboxAsync(peer);
+            // Служебные пакеты (в том числе «вас добавили в группу») — раньше сообщений групп.
+            if (!await FlushOutboxAsync(peer)) return;
+            await FlushGroupMessagesAsync(peer);
         }
         finally
         {
@@ -638,18 +705,22 @@ public sealed class ChatService : IDisposable
         }
     }
 
-    /// <summary>Служебные пакеты собеседнику — строго по порядку, при ошибке ждём следующей попытки.</summary>
-    private async Task FlushOutboxAsync(Peer peer)
+    /// <summary>
+    /// Служебные пакеты собеседнику — строго по порядку, при ошибке ждём следующей попытки.
+    /// false — не всё ушло.
+    /// </summary>
+    private async Task<bool> FlushOutboxAsync(Peer peer)
     {
         while (_outbox.FirstOrDefault(o => o.PeerId == peer.Id) is { } item)
         {
             var packet = JsonSerializer.Deserialize<ChatPacket>(item.PacketJson)!;
             Stamp(packet);
-            if (!await _messaging.SendAsync(peer.Address, peer.Port, packet)) return;
+            if (!await _messaging.SendAsync(peer.Address, peer.Port, packet)) return false;
             MarkReachable(peer);
             _outbox.Remove(item);
             _store.DeleteOutbox(item.Seq);
         }
+        return true;
     }
 
     /// <summary>Подписывает пакет нашими данными: кто отправил и куда отвечать.</summary>
@@ -669,37 +740,12 @@ public sealed class ChatService : IDisposable
         while (contact.Messages.FirstOrDefault(m => m.IsOutgoing && m.Status == MessageStatus.Queued)
                is { } message)
         {
-            var packet = new ChatPacket
+            var packet = BuildMessagePacket(message);
+            if (packet == null)
             {
-                Type = message.IsImage ? ChatPacket.Image : ChatPacket.Message,
-                Id = message.Id,
-                From = _settings.UserId,
-                FromName = _settings.DisplayName,
-                FromMachine = Environment.MachineName,
-                FromPort = _messaging.Port,
-                Text = message.Text,
-                SentAt = new DateTimeOffset(message.Timestamp),
-                IsBroadcast = message.IsBroadcast,
-                FileName = message.FileName,
-                ReplyToId = message.ReplyToId,
-                // У себя автор цитаты — «Вы», а собеседнику нужно наше имя.
-                ReplyAuthor = message.ReplyAuthor == MyReplyAuthor ? _settings.DisplayName : message.ReplyAuthor,
-                ReplyText = message.ReplyText,
-            };
-            if (message.IsImage || message.IsFile)
-            {
-                // Вложение уходит потоком прямо с диска — очередь переживает перезапуск, а большой файл
-                // не загружается в память целиком.
-                var attachment = message.IsImage ? message.ImagePath : message.FilePath;
-                if (!File.Exists(attachment))
-                {
-                    Log.Error($"Файл вложения {attachment} пропал — убираем сообщение из очереди");
-                    contact.Messages.Remove(message);
-                    _store.DeleteMessage(message.Id);
-                    continue;
-                }
-                packet.Type = message.IsImage ? ChatPacket.Image : ChatPacket.File;
-                packet.PayloadPath = attachment;
+                contact.Messages.Remove(message);
+                _store.DeleteMessage(message.Id);
+                continue;
             }
 
             message.Status = MessageStatus.Sending;
@@ -740,16 +786,14 @@ public sealed class ChatService : IDisposable
             .ToList();
         if (readMessages.Count > 0)
         {
-            var sent = await _messaging.SendAsync(peer.Address, peer.Port, new ChatPacket
+            var receipt = new ChatPacket
             {
                 Type = ChatPacket.ReadReceipt,
                 Id = Guid.NewGuid(),
-                From = _settings.UserId,
-                FromName = _settings.DisplayName,
-                FromMachine = Environment.MachineName,
-                FromPort = _messaging.Port,
                 MessageIds = readMessages.Select(m => m.Id).ToList(),
-            });
+            };
+            Stamp(receipt);
+            var sent = await _messaging.SendAsync(peer.Address, peer.Port, receipt);
             if (sent)
             {
                 foreach (var message in readMessages)
@@ -760,6 +804,42 @@ public sealed class ChatService : IDisposable
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Пакет своего сообщения (текст, изображение или файл). null — файл вложения пропал с диска,
+    /// отправлять нечего.
+    /// </summary>
+    private ChatPacket? BuildMessagePacket(ChatMessage message)
+    {
+        var packet = new ChatPacket
+        {
+            Type = ChatPacket.Message,
+            Id = message.Id,
+            Text = message.Text,
+            SentAt = new DateTimeOffset(message.Timestamp),
+            IsBroadcast = message.IsBroadcast,
+            FileName = message.FileName,
+            ReplyToId = message.ReplyToId,
+            // У себя автор цитаты — «Вы», а собеседнику нужно наше имя.
+            ReplyAuthor = message.ReplyAuthor == MyReplyAuthor ? _settings.DisplayName : message.ReplyAuthor,
+            ReplyText = message.ReplyText,
+        };
+        Stamp(packet);
+        if (message.IsImage || message.IsFile)
+        {
+            // Вложение уходит потоком прямо с диска — очередь переживает перезапуск, а большой файл
+            // не загружается в память целиком.
+            var attachment = message.IsImage ? message.ImagePath : message.FilePath;
+            if (!File.Exists(attachment))
+            {
+                Log.Error($"Файл вложения {attachment} пропал — убираем сообщение из очереди");
+                return null;
+            }
+            packet.Type = message.IsImage ? ChatPacket.Image : ChatPacket.File;
+            packet.PayloadPath = attachment;
+        }
+        return packet;
     }
 
     // ---- Входящие ----
@@ -776,21 +856,40 @@ public sealed class ChatService : IDisposable
         if (packet.ReceivedPayloadPath != null && packet.Type is not (ChatPacket.Image or ChatPacket.File))
             FileStore.DeleteQuietly(packet.ReceivedPayloadPath);
 
+        // Пакет относится к группе — дальше работаем с перепиской группы, а не с личной.
+        Contact conversation = contact;
+        if (packet.IsGroup && packet.Type != ChatPacket.GroupUpdate)
+        {
+            var group = GroupForPacket(packet, contact);
+            if (group == null)
+            {
+                if (packet.ReceivedPayloadPath != null) FileStore.DeleteQuietly(packet.ReceivedPayloadPath);
+                return;
+            }
+            conversation = group;
+        }
+
         switch (packet.Type)
         {
             case ChatPacket.Message:
             case ChatPacket.Image:
             case ChatPacket.File:
-                ReceiveMessage(contact, packet);
+                ReceiveMessage(conversation, packet);
                 break;
             case ChatPacket.Typing:
-                ShowTyping(contact, "печатает…");
+                ShowTyping(conversation, conversation.IsGroup ? $"{contact.Title} печатает…" : "печатает…");
                 break;
             case ChatPacket.Edit:
-                ApplyEdit(contact, packet);
+                ApplyEdit(conversation, packet);
                 break;
             case ChatPacket.Delete:
-                ApplyDelete(contact, packet);
+                ApplyDelete(conversation, packet);
+                break;
+            case ChatPacket.GroupUpdate when packet.IsGroup:
+                OnGroupUpdate(contact, packet);
+                break;
+            case ChatPacket.ReadReceipt when packet.MessageIds != null && conversation.IsGroup:
+                OnGroupReadReceipt(conversation, contact.Peer!.Id, packet.MessageIds);
                 break;
             case not null when packet.Type.StartsWith("game-", StringComparison.Ordinal):
                 GamePacketReceived?.Invoke(contact, packet);
@@ -804,6 +903,7 @@ public sealed class ChatService : IDisposable
         }
     }
 
+    /// <summary>Входящее сообщение в личную переписку или в группу (<paramref name="contact"/> — куда положить).</summary>
     private void ReceiveMessage(Contact contact, ChatPacket packet)
     {
         var received = packet.ReceivedPayloadPath;
@@ -872,9 +972,11 @@ public sealed class ChatService : IDisposable
             ReplyText = packet.ReplyText.Length > ChatMessage.MaxQuoteLength + 1
                 ? packet.ReplyText[..(ChatMessage.MaxQuoteLength + 1)]
                 : packet.ReplyText,
+            SenderId = contact.IsGroup ? packet.From : null,
+            SenderName = contact.IsGroup ? packet.FromName : "",
         };
         contact.Messages.Add(message);
-        _store.SaveContact(contact.Peer!);
+        if (contact.Peer != null) _store.SaveContact(contact.Peer);
         Save(contact, message);
 
         if (IsConversationVisible(contact))
@@ -903,6 +1005,7 @@ public sealed class ChatService : IDisposable
         // Обновляем имя и адрес у тех, с кем уже есть переписка.
         if (contact.Messages.Count > 0)
             _store.SaveContact(peer);
+        UpdateGroupStatuses();
         PresenceChanged?.Invoke();
         _ = FlushAsync(contact);
     }
@@ -914,6 +1017,7 @@ public sealed class ChatService : IDisposable
             message.PeerOffline = true;
         StopTyping(contact);
         RemoveIfForgotten(contact);
+        UpdateGroupStatuses();
         PresenceChanged?.Invoke();
     }
 
@@ -926,18 +1030,26 @@ public sealed class ChatService : IDisposable
         contact.IsMuted = _settings.MutedChats.Contains(peer.Id);
         _contactsByPeer.Add(peer.Id, contact);
 
+        InsertSorted(contact);
+        return contact;
+    }
+
+    /// <summary>Вставляет в список: после «Все» — группы, затем люди; внутри — по алфавиту.</summary>
+    private void InsertSorted(Contact contact)
+    {
         var index = 1;
         while (index < Contacts.Count &&
-               string.Compare(Contacts[index].Title, contact.Title, StringComparison.CurrentCultureIgnoreCase) < 0)
+               (Contacts[index].IsGroup && !contact.IsGroup ||
+                Contacts[index].IsGroup == contact.IsGroup &&
+                string.Compare(Contacts[index].Title, contact.Title, StringComparison.CurrentCultureIgnoreCase) < 0))
             index++;
         Contacts.Insert(index, contact);
-        return contact;
     }
 
     /// <summary>Ушедший из сети компьютер без переписки убираем из списка, с перепиской — оставляем серым.</summary>
     private void RemoveIfForgotten(Contact contact)
     {
-        if (contact.IsOnline || contact.Messages.Count > 0 || _pinnedPeers.Contains(contact.Peer!.Id)) return;
+        if (contact.IsGroup || contact.IsOnline || contact.Messages.Count > 0 || _pinnedPeers.Contains(contact.Peer!.Id)) return;
         _contactsByPeer.Remove(contact.Peer!.Id);
         Contacts.Remove(contact);
         _store.DeleteContact(contact.Peer.Id);
