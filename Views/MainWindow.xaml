@@ -58,9 +58,12 @@
                             </StackPanel>
                         </DockPanel>
                     </Border>
+                    <!-- Текст без ссылок — выделяется мышью; со ссылками — ссылки кликабельны, копирование через меню -->
                     <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
                              FontSize="14" BorderThickness="0" Background="Transparent" Padding="0"
-                             Visibility="{Binding HasText, Converter={StaticResource BoolToVisibility}}" />
+                             Visibility="{Binding HasPlainText, Converter={StaticResource BoolToVisibility}}" />
+                    <TextBlock local:LinkText.Source="{Binding Text}" TextWrapping="Wrap" FontSize="14"
+                               Visibility="{Binding HasLinks, Converter={StaticResource BoolToVisibility}}" />
                     <DockPanel Margin="0,3,0,0">
                         <TextBlock DockPanel.Dock="Right" Text="{Binding TimeText}" FontSize="10" Margin="10,0,0,0"
                                    Foreground="{StaticResource MutedTextBrush}" />
