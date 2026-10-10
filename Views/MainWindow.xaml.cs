@@ -264,7 +264,12 @@ public partial class MainWindow : Window
             ChatStatusText.Text = _current.TypingText;
             return;
         }
-        if (_current.IsEveryone)
+        if (_current.Group is { } group)
+        {
+            var others = group.Members.Where(m => m.Id != _chat.MyId).Select(m => m.Name);
+            ChatStatusText.Text = $"{group.StatusText} · {string.Join(", ", others.Prepend("вы"))}";
+        }
+        else if (_current.IsEveryone)
         {
             var count = _chat.OnlineCount;
             ChatStatusText.Text = count == 0
@@ -765,12 +770,61 @@ public partial class MainWindow : Window
         if (_current != null) ConfirmRemove(_current);
     }
 
+    // ---- Группы ----
+
+    private void CreateGroup_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new GroupWindow(null, _chat.People, _chat.IsPeerOnline, _chat.MyId) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        OpenConversation(_chat.CreateGroup(dialog.EnteredName, dialog.SelectedPeople));
+    }
+
+    private void GroupMembers_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current is { IsGroup: true } contact) EditGroup(contact);
+    }
+
+    private void EditGroup(Contact contact)
+    {
+        var dialog = new GroupWindow(contact.Group, _chat.People, _chat.IsPeerOnline, _chat.MyId) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        _chat.RenameGroup(contact, dialog.EnteredName);
+        _chat.AddGroupMembers(contact, dialog.SelectedPeople);
+    }
+
+    private void LeaveGroup_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current is { IsGroup: true } contact) ConfirmLeave(contact);
+    }
+
+    private void ConfirmLeave(Contact contact)
+    {
+        var text = $"Выйти из группы «{contact.Title}»?\n\nПереписка группы удалится с этого компьютера. " +
+                   "Вернуться можно, если кто-то из участников добавит вас снова.";
+        if (MessageBox.Show(this, text, "Выход из группы", MessageBoxButton.YesNo, MessageBoxImage.Question,
+                MessageBoxResult.No) == MessageBoxResult.Yes)
+            _chat.LeaveGroup(contact);
+    }
+
     private void ContactsList_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         var contact = (e.OriginalSource as FrameworkElement)?.DataContext as Contact;
         if (contact == null || contact.IsEveryone)
         {
             e.Handled = true;
+            return;
+        }
+        if (contact.IsGroup)
+        {
+            var members = new MenuItem { Header = "Участники…" };
+            members.Click += (_, _) => EditGroup(contact);
+            var groupMute = new MenuItem { Header = contact.IsMuted ? "Включить уведомления" : "Выключить уведомления" };
+            groupMute.Click += (_, _) => _chat.SetMuted(contact, !contact.IsMuted);
+            var groupClear = new MenuItem { Header = "Очистить переписку", IsEnabled = contact.Messages.Count > 0 };
+            groupClear.Click += (_, _) => ConfirmClear(contact);
+            var leave = new MenuItem { Header = "Выйти из группы" };
+            leave.Click += (_, _) => ConfirmLeave(contact);
+            ContactsList.ContextMenu = new ContextMenu { Items = { members, groupMute, new Separator(), groupClear, leave } };
             return;
         }
 
@@ -795,9 +849,11 @@ public partial class MainWindow : Window
     private void ConfirmClear(Contact contact)
     {
         var hasQueued = contact.Messages.Any(m => m.CanCancel);
-        var text = $"Удалить всю переписку с «{contact.Title}» на этом компьютере?" +
+        var text = (contact.IsGroup
+                       ? $"Удалить всю переписку группы «{contact.Title}» на этом компьютере?"
+                       : $"Удалить всю переписку с «{contact.Title}» на этом компьютере?") +
                    (hasQueued ? "\n\nНеотправленные сообщения тоже будут отменены." : "") +
-                   "\n\nУ собеседника переписка останется.";
+                   (contact.IsGroup ? "\n\nУ остальных участников переписка останется." : "\n\nУ собеседника переписка останется.");
         if (MessageBox.Show(this, text, "Очистить переписку", MessageBoxButton.YesNo,
                 MessageBoxImage.Question, MessageBoxResult.No) == MessageBoxResult.Yes)
             _chat.ClearConversation(contact);

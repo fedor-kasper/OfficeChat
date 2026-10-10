@@ -4,28 +4,47 @@ using System.Runtime.CompilerServices;
 
 namespace OfficeChat.Models;
 
-/// <summary>Строка в списке слева: либо конкретный компьютер со своей перепиской, либо «Все».</summary>
+/// <summary>Строка в списке слева: конкретный компьютер со своей перепиской, группа или «Все».</summary>
 public sealed class Contact : INotifyPropertyChanged
 {
     private int _unreadCount;
     private bool _hasOlderMessages;
 
-    /// <summary>Компьютер собеседника; null — рассылка всем.</summary>
+    /// <summary>Компьютер собеседника; null — группа или рассылка всем.</summary>
     public Peer? Peer { get; }
 
-    public bool IsEveryone => Peer == null;
+    /// <summary>Групповой чат; null — личная переписка или «Все».</summary>
+    public ChatGroup? Group { get; }
 
-    /// <summary>Личная переписка (у «Все» всегда пуста — такие сообщения раскладываются по личным).</summary>
+    public bool IsEveryone => Peer == null && Group == null;
+
+    public bool IsGroup => Group != null;
+
+    /// <summary>Личная переписка с одним человеком.</summary>
+    public bool IsPerson => Peer != null;
+
+    /// <summary>Настоящая переписка (человек или группа), а не «Все».</summary>
+    public bool IsConversation => !IsEveryone;
+
+    /// <summary>Под каким Id переписка хранится в истории: Id собеседника или группы.</summary>
+    public Guid Key => Peer?.Id ?? Group?.Id ?? Guid.Empty;
+
+    /// <summary>Переписка (у «Все» всегда пуста — такие сообщения раскладываются по личным).</summary>
     public ObservableCollection<ChatMessage> Messages { get; } = new();
 
-    public string Title => Peer?.Name ?? "Все";
+    public string Title => Peer?.Name ?? Group?.Name ?? "Все";
 
+    /// <summary>Группа и «Все» всегда «в сети»: писать туда можно в любой момент.</summary>
     public bool IsOnline => Peer?.IsOnline ?? true;
 
-    /// <summary>Вручную убрать из списка можно только того, кто не в сети.</summary>
+    /// <summary>Позвать играть можно только человека в сети.</summary>
+    public bool CanInviteToGame => Peer is { IsOnline: true };
+
+    /// <summary>Вручную убрать из списка можно только того, кто не в сети (из группы — выйти).</summary>
     public bool CanRemove => Peer is { IsOnline: false };
 
     public string Subtitle => IsTyping ? TypingText
+        : Group != null ? Group.StatusText
         : Peer == null ? "Отправить каждому, кто в сети"
         : Peer.IsOnline ? $"{Peer.Machine} · {Peer.Address}" : "не в сети";
 
@@ -90,9 +109,16 @@ public sealed class Contact : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    private Contact(Peer? peer)
+    private Contact(Peer? peer, ChatGroup? group = null)
     {
         Peer = peer;
+        Group = group;
+        if (group != null)
+            group.PropertyChanged += (_, _) =>
+            {
+                OnPropertyChanged(nameof(Title));
+                OnPropertyChanged(nameof(Subtitle));
+            };
         if (peer != null)
             peer.PropertyChanged += (_, _) =>
             {
@@ -100,12 +126,15 @@ public sealed class Contact : INotifyPropertyChanged
                 OnPropertyChanged(nameof(Subtitle));
                 OnPropertyChanged(nameof(IsOnline));
                 OnPropertyChanged(nameof(CanRemove));
+                OnPropertyChanged(nameof(CanInviteToGame));
             };
     }
 
     public static Contact Everyone() => new(null);
 
     public static Contact For(Peer peer) => new(peer);
+
+    public static Contact For(ChatGroup group) => new(null, group);
 
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
