@@ -88,6 +88,13 @@ public sealed class ChatMessage : INotifyPropertyChanged
 
     public bool HasText => !string.IsNullOrEmpty(Text);
 
+    /// <summary>В тексте есть ссылки — показываем его с кликабельными ссылками.</summary>
+    public bool HasLinks => _hasLinks ??= !IsGame && Services.LinkParser.ContainsLink(Text);
+    private bool? _hasLinks;
+
+    /// <summary>Текст без ссылок — показываем как обычно (с выделением).</summary>
+    public bool HasPlainText => HasText && !HasLinks;
+
     /// <summary>Короткий текст для уведомлений: у изображения — значок и подпись.</summary>
     public string PreviewText => Kind switch
     {
