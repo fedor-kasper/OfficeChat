@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.ReminderEditorWindow"
+        Title="OfficeChat — напоминание"
+        Width="480" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="20" Spacing="4">
+        <TextBlock x:Name="HeaderText" FontSize="16" FontWeight="SemiBold" />
+
+        <TextBlock Text="О чём напомнить" Margin="0,8,0,2" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <TextBox x:Name="TextBox" FontSize="14" MinHeight="60" MaxHeight="140" AcceptsReturn="True" TextWrapping="Wrap"
+                 MaxLength="1000" Watermark="Например: позвонить поставщику по поводу возврата" />
+
+        <CheckBox x:Name="HasTimeBox" Margin="0,10,0,0" Content="Напомнить в определённое время" IsChecked="True" />
+        <StackPanel x:Name="TimePanel" Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <CalendarDatePicker x:Name="DateBox" Width="160" SelectedDateFormat="Custom" CustomDateFormatString="dd.MM.yyyy" />
+                <TextBox x:Name="TimeBox" Width="80" Watermark="ЧЧ:ММ" MaxLength="5" />
+                <ComboBox x:Name="RepeatBox" Width="170" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button Content="через 15 мин" Padding="8,2" FontSize="12" Tag="15" Click="Quick_Click" />
+                <Button Content="через час" Padding="8,2" FontSize="12" Tag="60" Click="Quick_Click" />
+                <Button Content="сегодня 17:00" Padding="8,2" FontSize="12" Tag="today17" Click="Quick_Click" />
+                <Button Content="завтра 9:00" Padding="8,2" FontSize="12" Tag="tomorrow9" Click="Quick_Click" />
+            </StackPanel>
+        </StackPanel>
+
+        <DockPanel Margin="0,12,0,0">
+            <Border x:Name="ImportanceChip" DockPanel.Dock="Right" CornerRadius="4" Padding="8,1" VerticalAlignment="Center">
+                <TextBlock x:Name="ImportanceText" FontSize="12" FontWeight="SemiBold" Foreground="White" />
+            </Border>
+            <TextBlock Text="Важность" FontSize="12" Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+        </DockPanel>
+        <Slider x:Name="ImportanceSlider" Minimum="1" Maximum="5" TickFrequency="1" IsSnapToTickEnabled="True"
+                TickPlacement="BottomRight" Value="2" />
+        <!-- Как будет выглядеть и что будет делать напоминание этой важности -->
+        <Border x:Name="Preview" CornerRadius="6" BorderThickness="1" Padding="10,6">
+            <TextBlock x:Name="BehaviorText" FontSize="12" TextWrapping="Wrap" Foreground="#374151" />
+        </Border>
+
+        <TextBlock x:Name="PeopleLabel" Text="Отправить также (у них напоминание появится на доске)" Margin="0,12,0,2"
+                   FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+        <Border x:Name="PeopleBorder" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6" MaxHeight="150">
+            <ScrollViewer>
+                <StackPanel x:Name="PeopleList" Margin="10,4" Spacing="0" />
+            </ScrollViewer>
+        </Border>
+
+        <TextBlock x:Name="ErrorText" Foreground="#DC2626" FontSize="12" IsVisible="False" Margin="0,6,0,0" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0" Spacing="8">
+            <Button x:Name="OkButton" MinWidth="110" IsDefault="True" Classes="flat" HorizontalContentAlignment="Center"
+                    Click="Ok_Click" />
+            <Button Content="Отмена" MinWidth="90" IsCancel="True" HorizontalContentAlignment="Center" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

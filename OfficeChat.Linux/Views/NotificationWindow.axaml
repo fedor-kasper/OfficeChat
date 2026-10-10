@@ -21,8 +21,27 @@
         </Style>
     </Window.Styles>
 
-    <Border BorderBrush="#2563EB" BorderThickness="2">
-        <StackPanel>
+    <!-- Обычное сообщение — красная рамка; тихое — маленькая полоска без рамки (см. Compact) -->
+    <Border x:Name="Frame" BorderBrush="#DC2626" BorderThickness="3">
+        <Panel>
+        <!-- Тихое сообщение: только имя и начало текста, клик — открыть переписку -->
+        <DockPanel x:Name="CompactView" IsVisible="False" Background="#F8FAFC">
+            <Button DockPanel.Dock="Right" Content="✕" Width="28" Height="28" Padding="0" FontSize="12"
+                    Classes="plain" Foreground="#6B7280" VerticalAlignment="Center" Margin="0,0,4,0"
+                    HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                    ToolTip.Tip="Закрыть" Click="Close_Click" />
+            <DockPanel Margin="10,7,4,7" Cursor="Hand" Background="Transparent"
+                       PointerReleased="Open_Click" ToolTip.Tip="Тихое сообщение — открыть переписку">
+                <Border DockPanel.Dock="Left" Width="26" Height="26" CornerRadius="13" Background="#E5E7EB"
+                        Margin="0,0,8,0" VerticalAlignment="Center">
+                    <TextBlock x:Name="CompactAvatar" FontSize="12" FontWeight="Bold" Foreground="#4B5563"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <TextBlock x:Name="CompactText" FontSize="13" Foreground="#374151" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </DockPanel>
+        <StackPanel x:Name="FullView">
             <!-- Яркая шапка: аватар, имя, время, закрыть -->
             <Border Background="{StaticResource HeaderBrush}" Padding="14,10,8,10" Cursor="Hand"
                     PointerReleased="Open_Click" ToolTip.Tip="Открыть переписку">
@@ -83,5 +102,6 @@
                 <TextBox x:Name="ReplyBox" FontSize="14" MaxLength="4000" Watermark="Быстрый ответ…" />
             </DockPanel>
         </StackPanel>
+        </Panel>
     </Border>
 </Window>

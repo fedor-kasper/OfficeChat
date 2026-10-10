@@ -4,6 +4,7 @@ using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using OfficeChat.Models;
 
@@ -36,14 +37,36 @@ public partial class NotificationWindow : Window, IStackedPopup
         MessagesList.ItemsSource = _messages;
         SenderText.Text = contact.Title;
         AvatarText.Text = contact.Title.Length > 0 ? char.ToUpper(contact.Title[0]).ToString() : "?";
+        CompactAvatar.Text = AvatarText.Text;
+        // Тихое сообщение всплывает маленькой полоской; обычное — полным окном.
+        SetCompact(message.IsQuiet && !message.IsOutgoing);
         AddMessage(message);
 
         ReplyBox.AddHandler(KeyDownEvent, ReplyBox_KeyDown, RoutingStrategies.Tunnel);
         Popups.SetupFade(this);
     }
 
+    /// <summary>Маленькая полоска (тихие сообщения) или полное окно.</summary>
+    public bool IsCompact { get; private set; }
+
+    private void SetCompact(bool compact)
+    {
+        IsCompact = compact;
+        CompactView.IsVisible = compact;
+        FullView.IsVisible = !compact;
+        Width = compact ? 340 : 420;
+        Frame.BorderThickness = new Thickness(compact ? 1 : 3);
+        Frame.BorderBrush = compact ? Brushes.LightGray : RedBrush;
+    }
+
+    private static readonly IBrush RedBrush = new SolidColorBrush(Color.FromRgb(0xDC, 0x26, 0x26));
+
     public void AddMessage(ChatMessage message)
     {
+        // Пришло обычное сообщение, а окно было маленьким (тихим) — разворачиваем.
+        if (IsCompact && !message.IsOutgoing && !message.IsQuiet) SetCompact(false);
+        var who = message.ShowSender ? $"{message.SenderName}: " : "";
+        CompactText.Text = $"{Contact.Title} · {who}{message.PreviewText.ReplaceLineEndings(" ")}";
         _messages.Add(message);
         if (!message.IsOutgoing)
         {

@@ -1,0 +1,34 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.ReminderPopupWindow"
+        Title="OfficeChat — напоминание"
+        Width="400" SizeToContent="Height"
+        SystemDecorations="None" CanResize="False" Topmost="True"
+        ShowInTaskbar="False" ShowActivated="False" Background="White">
+    <!-- Рамка и шапка — в цвет важности -->
+    <Border x:Name="Frame" BorderThickness="3">
+        <StackPanel>
+            <Border x:Name="Header" Padding="12,8,6,8">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="⏰" FontSize="22" VerticalAlignment="Center" Margin="0,0,10,0" />
+                    <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="✕" Width="28" Height="28" Padding="0"
+                            FontSize="13" Classes="plain" VerticalAlignment="Top"
+                            HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                            ToolTip.Tip="Закрыть" Click="Close_Click" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock x:Name="TitleText" FontSize="15" FontWeight="SemiBold" Foreground="#111827" />
+                        <TextBlock x:Name="SubtitleText" FontSize="11" Foreground="#4B5563" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <TextBlock x:Name="BodyText" Margin="14,10,14,0" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
+            <StackPanel Orientation="Horizontal" Margin="14,12,14,12" Spacing="6">
+                <Button Content="✓ Готово" Padding="14,5" FontSize="13" FontWeight="SemiBold" Classes="flat"
+                        Background="#16A34A" Click="Done_Click" />
+                <Button x:Name="SnoozeButton" Content="⏱ Отложить ▾" Padding="12,5" FontSize="13" Click="Snooze_Click" />
+                <Button Content="Доска" Padding="10,5" FontSize="13" Classes="plain" Foreground="#2563EB"
+                        ToolTip.Tip="Открыть доску напоминаний" Click="Open_Click" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

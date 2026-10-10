@@ -23,6 +23,7 @@ public partial class MainWindow : Window
     private readonly NotificationManager _notifications;
     private readonly GameService _games;
     private readonly UpdateService _updates;
+    private readonly ReminderService _reminders;
     private readonly Tray _tray;
     private Contact? _current;
     // Изображения, выбранные для отправки (полоса над полем ввода).
@@ -77,7 +78,7 @@ public partial class MainWindow : Window
         _tray.ExitRequested += ExitApplication;
         _chat.UnreadChanged += () =>
         {
-            _tray.SetUnread(_chat.TotalUnread);
+            UpdateTray();
             UpdateMuteButton();
         };
 
@@ -98,6 +99,19 @@ public partial class MainWindow : Window
         ChatPanel.AddHandler(DragDrop.DropEvent, ChatPanel_Drop);
 
         _chat.Start();
+
+        _reminders = new ReminderService(_chat);
+        _reminders.ReminderDue += reminder => _notifications.ShowReminder(reminder, _reminders, ShowReminders);
+        _reminders.ReminderReceived += OnReminderReceived;
+        _reminders.Changed += () =>
+        {
+            _notifications.CloseAnsweredReminders(_reminders);
+            UpdateRemindersButton();
+            UpdateTray();
+        };
+        RemindersView.Attach(_reminders, () => _chat.People);
+        _reminders.Start();
+        UpdateRemindersButton();
 
         // Обновление ставится, только когда окно свёрнуто в трей и ничего не прервётся.
         _updates = new UpdateService(_chat,
@@ -212,9 +226,10 @@ public partial class MainWindow : Window
         if (_current == null)
         {
             ChatPanel.IsVisible = false;
-            EmptyPanel.IsVisible = true;
+            EmptyPanel.IsVisible = !RemindersView.IsVisible;
             return;
         }
+        RemindersView.IsVisible = false;
 
         _current.Messages.CollectionChanged += OnCurrentMessagesChanged;
         _current.PropertyChanged += OnCurrentContactChanged;
@@ -318,6 +333,12 @@ public partial class MainWindow : Window
             e.Handled = true;
             SendCurrent();
         }
+        else if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.Control)
+        {
+            // Ctrl+Enter — отправить тихо.
+            e.Handled = true;
+            SendCurrent(quiet: true);
+        }
         else if (e.Key == Key.Escape && ComposeBar.IsVisible)
         {
             e.Handled = true;
@@ -340,8 +361,9 @@ public partial class MainWindow : Window
 
     private void Send_Click(object? sender, RoutedEventArgs e) => SendCurrent();
 
-    private async void SendCurrent()
+    private async void SendCurrent(bool quiet = false)
     {
+        quiet |= QuietToggle.IsChecked == true;
         var text = InputBox.Text?.Trim() ?? "";
         var contact = _current;
         if (contact != null && _editing != null)
@@ -354,6 +376,8 @@ public partial class MainWindow : Window
         // Ответ привязываем к первому, что уходит: к тексту или к первому вложению.
         var replyTo = _replyTo;
         CancelCompose();
+        // «Тихо» — только для этого сообщения, чтобы следующее случайно не ушло тихим.
+        QuietToggle.IsChecked = false;
 
         int recipients;
         if (_attachments.Count > 0)
@@ -367,14 +391,14 @@ public partial class MainWindow : Window
             foreach (var item in items)
             {
                 if (item.IsImage)
-                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption, replyTo);
+                    recipients = _chat.SendImage(contact, item.Data!, item.FileName, caption, replyTo, quiet);
                 else
                 {
                     // Большой файл сначала копируется в хранилище программы — это может занять время.
                     if (item.Size > 50 * 1024 * 1024) ShowNotice($"Подготовка «{item.FileName}» к отправке…");
                     try
                     {
-                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption, replyTo);
+                        recipients = await _chat.SendFileAsync(contact, item.SourcePath!, caption, replyTo, quiet);
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
@@ -386,11 +410,11 @@ public partial class MainWindow : Window
                 replyTo = null;
             }
             if (items.Count > 1 && text.Length > 0)
-                _chat.Send(contact, text);
+                _chat.Send(contact, text, quiet: quiet);
         }
         else
         {
-            recipients = _chat.Send(contact, text, replyTo);
+            recipients = _chat.Send(contact, text, replyTo, quiet);
         }
         if (contact != _current) return;
 
@@ -767,6 +791,55 @@ public partial class MainWindow : Window
         if (_current != null) await ConfirmRemove(_current);
     }
 
+    // ---- Напоминания ----
+
+    /// <summary>Значок в трее: непрочитанные плюс сработавшие срочные напоминания.</summary>
+    private void UpdateTray() => _tray.SetUnread(_chat.TotalUnread + (_reminders?.AttentionCount ?? 0));
+
+    private void UpdateRemindersButton()
+    {
+        var count = _reminders.OverdueCount;
+        RemindersBadge.IsVisible = count > 0;
+        RemindersBadgeText.Text = count.ToString();
+    }
+
+    private void Reminders_Click(object? sender, RoutedEventArgs e) => ShowReminders();
+
+    /// <summary>Открыть доску напоминаний на месте переписки.</summary>
+    public void ShowReminders()
+    {
+        ShowFromTray();
+        RemindersView.IsVisible = true;
+        ContactsList.SelectedItem = null;
+        EmptyPanel.IsVisible = false;
+        ChatPanel.IsVisible = false;
+        RemindersView.Refresh();
+    }
+
+    private async void RemindAbout_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is not { } message) return;
+        var author = message.IsOutgoing ? "" : message.ShowSender ? message.SenderName : _current?.Title ?? "";
+        var text = author.Length > 0 ? $"{author}: {message.PreviewText}" : message.PreviewText;
+        await RemindersView.CreateAsync(text);
+    }
+
+    /// <summary>Коллега прислал напоминание — сообщаем тихим уведомлением от его имени.</summary>
+    private void OnReminderReceived(Reminder reminder)
+    {
+        if (_chat.FindContact(reminder.CreatorId) is not { } sender) return;
+        _notifications.Show(sender, new ChatMessage
+        {
+            Id = Guid.NewGuid(),
+            IsOutgoing = false,
+            Text = $"⏰ Новое напоминание: {reminder.Text}" +
+                   (reminder.DueAt is { } due ? $" ({Reminder.FormatTime(due)})" : ""),
+            Timestamp = DateTime.Now,
+            Kind = MessageKind.Service,
+            IsQuiet = reminder.Importance <= 2,
+        });
+    }
+
     // ---- Группы ----
 
     private async void CreateGroup_Click(object? sender, RoutedEventArgs e)
@@ -876,6 +949,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _updates.Dispose();
+        _reminders.Dispose();
         _games.LeaveAll();
         _games.Dispose();
         _notifications.CloseAll();

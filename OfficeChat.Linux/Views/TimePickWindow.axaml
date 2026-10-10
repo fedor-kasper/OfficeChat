@@ -1,0 +1,20 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.TimePickWindow"
+        Title="OfficeChat — отложить"
+        Width="320" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner" Topmost="True">
+    <StackPanel Margin="20" Spacing="8">
+        <TextBlock Text="Отложить до" FontSize="15" FontWeight="SemiBold" />
+        <StackPanel Orientation="Horizontal" Spacing="8">
+            <CalendarDatePicker x:Name="DateBox" Width="160" SelectedDateFormat="Custom" CustomDateFormatString="dd.MM.yyyy" />
+            <TextBox x:Name="TimeBox" Width="80" Watermark="ЧЧ:ММ" MaxLength="5" />
+        </StackPanel>
+        <TextBlock x:Name="ErrorText" Foreground="#DC2626" FontSize="12" IsVisible="False" />
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,6,0,0">
+            <Button Content="Отложить" MinWidth="100" IsDefault="True" Classes="flat" HorizontalContentAlignment="Center"
+                    Click="Ok_Click" />
+            <Button Content="Отмена" MinWidth="80" IsCancel="True" HorizontalContentAlignment="Center" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

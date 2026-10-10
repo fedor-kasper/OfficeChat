@@ -1,0 +1,96 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:OfficeChat.Views"
+             x:Class="OfficeChat.Views.RemindersPanel">
+    <UserControl.Resources>
+        <local:ColorBrushConverter x:Key="Brush" />
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <Style Selector="TextBlock.due">
+            <Setter Property="Foreground" Value="#4B5563" />
+        </Style>
+        <Style Selector="TextBlock.due.overdue">
+            <Setter Property="Foreground" Value="#DC2626" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Button.tab">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style Selector="Button.tab.selected">
+            <Setter Property="Background" Value="#DBEAFE" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="Border.card.done">
+            <Setter Property="Opacity" Value="0.7" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="＋ Новое напоминание" Padding="12,5" FontSize="13" Classes="flat"
+                        Click="New_Click" />
+                <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <TextBlock Text="⏰ Напоминания" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button x:Name="ActiveTab" Classes="tab selected" Click="ActiveTab_Click" />
+                    <Button x:Name="DoneTab" Classes="tab" Click="DoneTab_Click" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Panel>
+            <ScrollViewer>
+                <ItemsControl x:Name="List" Margin="14,10">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <!-- Карточка: полоска и фон — цвет важности -->
+                            <Border Classes="card" Classes.done="{Binding IsDone}" Margin="0,4" CornerRadius="8"
+                                    Background="{Binding Tint, Converter={StaticResource Brush}}"
+                                    BorderBrush="{Binding Color, Converter={StaticResource Brush}}" BorderThickness="1"
+                                    ClipToBounds="True">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Left" Width="6"
+                                            Background="{Binding Color, Converter={StaticResource Brush}}" />
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="4" Margin="8"
+                                                VerticalAlignment="Top">
+                                        <Button Content="✓ Готово" Padding="10,3" FontSize="12" Classes="flat" Background="#16A34A"
+                                                IsVisible="{Binding !IsDone}" Click="Done_Click" />
+                                        <Button Content="↩ Вернуть" Padding="10,3" FontSize="12" IsVisible="{Binding IsDone}"
+                                                Click="Reopen_Click" />
+                                        <Button Content="⏱ Отложить" Padding="10,3" FontSize="12" Click="Snooze_Click" />
+                                        <Button Content="✎" Padding="8,3" FontSize="12" ToolTip.Tip="Изменить"
+                                                IsVisible="{Binding IsMine}" Click="Edit_Click" />
+                                        <Button Content="🗑" Padding="8,3" FontSize="12" ToolTip.Tip="Удалить" Click="Delete_Click" />
+                                    </StackPanel>
+                                    <StackPanel Margin="12,8,4,8" Spacing="3">
+                                        <TextBlock Text="{Binding Text}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
+                                                   Foreground="#111827" />
+                                        <WrapPanel>
+                                            <Border CornerRadius="4" Padding="6,0" Margin="0,0,8,0" VerticalAlignment="Center"
+                                                    Background="{Binding Color, Converter={StaticResource Brush}}">
+                                                <TextBlock Text="{Binding ImportanceName}" FontSize="11" Foreground="White" />
+                                            </Border>
+                                            <TextBlock Classes="due" Classes.overdue="{Binding IsOverdue}" FontSize="12"
+                                                       Margin="0,0,8,0" Text="{Binding DueText, StringFormat='⏰ {0}'}" />
+                                            <TextBlock Text="{Binding RepeatText}" FontSize="12" Foreground="#4B5563"
+                                                       Margin="0,0,8,0" IsVisible="{Binding HasRepeat}" />
+                                            <TextBlock Text="{Binding FromText}" FontSize="12" Foreground="#6B7280"
+                                                       IsVisible="{Binding IsFromOther}" />
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding ParticipantsText, StringFormat='👥 {0}'}" FontSize="12"
+                                                   Foreground="#4B5563" TextWrapping="Wrap" IsVisible="{Binding HasParticipants}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="380"
+                       TextAlignment="Center" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
+                       IsHitTestVisible="False" />
+        </Panel>
+    </DockPanel>
+</UserControl>
