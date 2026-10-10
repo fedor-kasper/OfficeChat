@@ -37,6 +37,20 @@
             <Setter Property="Foreground" Value="#111827" />
         </Style>
 
+        <!-- Без уведомлений: счётчик серый, не отвлекает -->
+        <Style Selector="Border.unread">
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+        </Style>
+        <Style Selector="Border.unread.muted">
+            <Setter Property="Background" Value="#9CA3AF" />
+        </Style>
+        <Style Selector="TextBlock.subtitle">
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+        <Style Selector="TextBlock.subtitle.typing">
+            <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+        </Style>
+
         <Style Selector="ListBoxItem">
             <Setter Property="Padding" Value="8,4" />
         </Style>
@@ -72,15 +86,20 @@
                                 <Ellipse Fill="#C4C8CF" IsVisible="{Binding !IsOnline}" />
                             </Panel>
                             <Border DockPanel.Dock="Right" MinWidth="20" Height="20" CornerRadius="10" Padding="6,0"
-                                    VerticalAlignment="Center" Background="{StaticResource AccentBrush}"
-                                    IsVisible="{Binding HasUnread}">
+                                    VerticalAlignment="Center"
+                                    Classes="unread" Classes.muted="{Binding IsMuted}" IsVisible="{Binding HasUnread}">
                                 <TextBlock Text="{Binding UnreadCount}" Foreground="White" FontSize="11"
                                            FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Border>
                             <StackPanel>
-                                <TextBlock Text="{Binding Title}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Text="{Binding Subtitle}" FontSize="11" Foreground="{StaticResource MutedTextBrush}"
-                                           TextTrimming="CharacterEllipsis" />
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="🔕" FontSize="11" Margin="4,0,0,0"
+                                               VerticalAlignment="Center" ToolTip.Tip="Уведомления выключены"
+                                               IsVisible="{Binding IsMuted}" />
+                                    <TextBlock Text="{Binding Title}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding Subtitle}" FontSize="11" Classes="subtitle"
+                                           Classes.typing="{Binding IsTyping}" TextTrimming="CharacterEllipsis" />
                             </StackPanel>
                         </DockPanel>
                     </DataTemplate>
@@ -105,6 +124,7 @@
                         <Button Content="🎮 Крестики-нолики" Padding="8,3" FontSize="12"
                                 ToolTip.Tip="Пригласить собеседника сыграть" Click="InviteToGame_Click"
                                 IsVisible="{Binding IsOnline}" />
+                        <Button x:Name="MuteButton" Padding="6,3" FontSize="12" Click="ToggleMute_Click" />
                         <Button Content="Очистить переписку" Padding="8,3" FontSize="12" Click="ClearConversation_Click" />
                         <Button Content="Удалить из списка" Padding="8,3" FontSize="12" Click="RemoveContact_Click"
                                 IsVisible="{Binding CanRemove}" />

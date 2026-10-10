@@ -61,13 +61,23 @@ public partial class MainWindow : Window
         _tray = new Tray();
         _tray.OpenRequested += ShowFromTray;
         _tray.ExitRequested += ExitApplication;
-        _chat.UnreadChanged += () => _tray.SetUnread(_chat.TotalUnread);
+        _chat.UnreadChanged += () =>
+        {
+            _tray.SetUnread(_chat.TotalUnread);
+            UpdateMuteButton();
+        };
 
         AttachmentsList.ItemsSource = _attachments;
         _attachments.CollectionChanged += (_, _) => AttachmentsBar.IsVisible = _attachments.Count > 0;
 
         // Enter — отправить, Shift+Enter — новая строка, Ctrl+V — вставка изображения из буфера.
         InputBox.AddHandler(KeyDownEvent, InputBox_KeyDown, RoutingStrategies.Tunnel);
+        // Набирают текст — сообщаем собеседнику «печатает…» (но не когда поле очистилось после отправки).
+        InputBox.TextChanged += (_, _) =>
+        {
+            if (_current != null && !string.IsNullOrEmpty(InputBox.Text) && InputBox.IsKeyboardFocusWithin)
+                _chat.NotifyTyping(_current);
+        };
 
         ChatPanel.AddHandler(DragDrop.DragOverEvent, ChatPanel_DragOver);
         ChatPanel.AddHandler(DragDrop.DragLeaveEvent, ChatPanel_DragLeave);
@@ -92,8 +102,8 @@ public partial class MainWindow : Window
 
     private void OnMessageReceived(Contact contact, ChatMessage message)
     {
-        // Если эта переписка уже открыта перед глазами — всплывать незачем.
-        if (!_chat.IsConversationVisible(contact))
+        // Если эта переписка уже открыта перед глазами или уведомления по ней выключены — всплывать незачем.
+        if (!_chat.IsConversationVisible(contact) && !contact.IsMuted)
             _notifications.Show(contact, message);
     }
 
@@ -220,6 +230,12 @@ public partial class MainWindow : Window
         if (_current == null) return;
 
         ChatTitleText.Text = _current.IsEveryone ? "Сообщение всем" : _current.Title;
+        UpdateMuteButton();
+        if (_current.IsTyping)
+        {
+            ChatStatusText.Text = _current.TypingText;
+            return;
+        }
         if (_current.IsEveryone)
         {
             var count = _chat.OnlineCount;
@@ -234,6 +250,22 @@ public partial class MainWindow : Window
                 ? $"в сети · {_current.Peer!.Machine} · {_current.Peer.Address}"
                 : "не в сети — сообщения будут доставлены, когда компьютер появится";
         }
+    }
+
+    private void UpdateMuteButton()
+    {
+        if (_current is not { IsEveryone: false } contact) return;
+        // Выключенные уведомления подписываем словами: значки 🔔 и 🔕 в мелком шрифте легко спутать.
+        MuteButton.Content = contact.IsMuted ? "🔕 Уведомления выключены" : "🔔";
+        ToolTip.SetTip(MuteButton, contact.IsMuted
+            ? "Уведомления выключены: сообщения приходят без всплывающих окон. Нажмите, чтобы включить"
+            : "Выключить уведомления от этой переписки");
+    }
+
+    private void ToggleMute_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_current is { IsEveryone: false } contact)
+            _chat.SetMuted(contact, !contact.IsMuted);
     }
 
     private void UpdateMessagesHint()
@@ -567,12 +599,14 @@ public partial class MainWindow : Window
             return;
         }
 
+        var mute = new MenuItem { Header = contact.IsMuted ? "Включить уведомления" : "Выключить уведомления" };
+        mute.Click += (_, _) => _chat.SetMuted(contact, !contact.IsMuted);
         var clear = new MenuItem { Header = "Очистить переписку", IsEnabled = contact.Messages.Count > 0 };
         clear.Click += async (_, _) => await ConfirmClear(contact);
         var remove = new MenuItem { Header = "Удалить из списка", IsEnabled = contact.CanRemove };
         remove.Click += async (_, _) => await ConfirmRemove(contact);
 
-        var menu = new ContextMenu { ItemsSource = new[] { clear, remove } };
+        var menu = new ContextMenu { ItemsSource = new Control[] { mute, new Separator(), clear, remove } };
         menu.Open(ContactsList);
         e.Handled = true;
     }
