@@ -184,7 +184,7 @@ public sealed class GameService : IDisposable
         var peerId = game.Opponent.Peer!.Id;
         if (_shown.TryGetValue(peerId, out var shown) && shown == game)
             _shown.Remove(peerId);
-        _chat.UnpinContact(game.Opponent);
+        _chat.ReleaseFromList(game.Opponent);
         RaiseChanged(game);
     }
 
@@ -333,7 +333,7 @@ public sealed class GameService : IDisposable
         _games.Add(game.Id, game);
         _shown[game.Opponent.Peer!.Id] = game;
         // Пока идёт игра, собеседник не должен пропадать из списка.
-        _chat.PinContact(game.Opponent);
+        _chat.KeepInList(game.Opponent);
         RaiseChanged(game);
     }
 

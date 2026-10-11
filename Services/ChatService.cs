@@ -29,7 +29,7 @@ public sealed partial class ChatService : IDisposable
     private readonly Dictionary<Guid, Contact> _contactsByPeer = new();
     private readonly HashSet<Guid> _flushing = new();
     // Собеседники, которых нельзя убирать из списка (например, с ними идёт игра).
-    private readonly HashSet<Guid> _pinnedPeers = new();
+    private readonly HashSet<Guid> _keptPeers = new();
     private readonly DispatcherTimer _retryTimer;
     private readonly DispatcherTimer _typingTimer;
     // Когда последний раз сообщали собеседнику, что мы печатаем.
@@ -158,6 +158,17 @@ public sealed partial class ChatService : IDisposable
         if (muted) _settings.MutedChats.Add(id);
         SettingsService.Save(_settings);
         UnreadChanged?.Invoke();
+    }
+
+    /// <summary>Закрепить переписку вверху списка или открепить (запоминается в настройках).</summary>
+    public void SetPinned(Contact contact, bool pinned)
+    {
+        if (contact.IsEveryone || contact.IsPinned == pinned) return;
+        contact.IsPinned = pinned;
+        var id = contact.Key;
+        _settings.PinnedChats.Remove(id);
+        if (pinned) _settings.PinnedChats.Add(id);
+        SettingsService.Save(_settings);
     }
 
     // ---- «печатает…» ----
@@ -319,14 +330,14 @@ public sealed partial class ChatService : IDisposable
     public Contact? FindContact(Guid peerId) => _contactsByPeer.GetValueOrDefault(peerId);
 
     /// <summary>Не убирать собеседника из списка, даже если он ушёл из сети без переписки.</summary>
-    public void PinContact(Contact contact)
+    public void KeepInList(Contact contact)
     {
-        if (contact.Peer != null) _pinnedPeers.Add(contact.Peer.Id);
+        if (contact.Peer != null) _keptPeers.Add(contact.Peer.Id);
     }
 
-    public void UnpinContact(Contact contact)
+    public void ReleaseFromList(Contact contact)
     {
-        if (contact.Peer == null || !_pinnedPeers.Remove(contact.Peer.Id)) return;
+        if (contact.Peer == null || !_keptPeers.Remove(contact.Peer.Id)) return;
         RemoveIfForgotten(contact);
     }
 
@@ -1085,22 +1096,61 @@ public sealed partial class ChatService : IDisposable
         return contact;
     }
 
-    /// <summary>Вставляет в список: после «Все» — группы, затем люди; внутри — по алфавиту.</summary>
+    /// <summary>
+    /// Вставляет в список и дальше держит на своём месте: «Все» — первым, затем закреплённые,
+    /// затем остальные; внутри — по последнему сообщению (новые вверху), без переписки — по алфавиту.
+    /// </summary>
     private void InsertSorted(Contact contact)
     {
-        var index = 1;
-        while (index < Contacts.Count &&
-               (Contacts[index].IsGroup && !contact.IsGroup ||
-                Contacts[index].IsGroup == contact.IsGroup &&
-                string.Compare(Contacts[index].Title, contact.Title, StringComparison.CurrentCultureIgnoreCase) < 0))
-            index++;
-        Contacts.Insert(index, contact);
+        contact.IsPinned = _settings.PinnedChats.Contains(contact.Key);
+        Contacts.Insert(Contacts.Count(c => CompareContacts(c, contact) < 0), contact);
+        contact.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(Contact.LastActivity) or nameof(Contact.IsPinned) or nameof(Contact.Title))
+                Reposition(contact);
+        };
+    }
+
+    /// <summary>Сейчас переставляется строка списка (выбор в списке при этом не менять).</summary>
+    public bool IsReordering { get; private set; }
+
+    private void Reposition(Contact contact)
+    {
+        var old = Contacts.IndexOf(contact);
+        if (old < 0) return;
+        var index = 0;
+        for (var i = 0; i < Contacts.Count; i++)
+        {
+            if (i == old) continue;
+            var order = CompareContacts(Contacts[i], contact);
+            if (order < 0 || order == 0 && i < old) index++;
+        }
+        if (index == old) return;
+        IsReordering = true;
+        try
+        {
+            Contacts.Move(old, index);
+        }
+        finally
+        {
+            IsReordering = false;
+        }
+    }
+
+    private static int CompareContacts(Contact a, Contact b)
+    {
+        static int Rank(Contact c) => c.IsEveryone ? 0 : c.IsPinned ? 1 : 2;
+        var order = Rank(a).CompareTo(Rank(b));
+        if (order == 0) order = b.LastActivity.CompareTo(a.LastActivity);
+        if (order == 0) order = b.IsGroup.CompareTo(a.IsGroup);
+        if (order == 0) order = string.Compare(a.Title, b.Title, StringComparison.CurrentCultureIgnoreCase);
+        return order;
     }
 
     /// <summary>Ушедший из сети компьютер без переписки убираем из списка, с перепиской — оставляем серым.</summary>
     private void RemoveIfForgotten(Contact contact)
     {
-        if (contact.IsGroup || contact.IsOnline || contact.Messages.Count > 0 || _pinnedPeers.Contains(contact.Peer!.Id)) return;
+        if (contact.IsGroup || contact.IsOnline || contact.Messages.Count > 0 || _keptPeers.Contains(contact.Peer!.Id)) return;
         _contactsByPeer.Remove(contact.Peer!.Id);
         Contacts.Remove(contact);
         _store.DeleteContact(contact.Peer.Id);
