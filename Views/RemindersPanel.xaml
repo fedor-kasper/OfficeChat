@@ -46,13 +46,16 @@
                                         <Button Content="↩ Вернуть" Padding="10,3" FontSize="12" Margin="0,0,4,0" Click="Reopen_Click"
                                                 Visibility="{Binding IsDone, Converter={StaticResource BoolToVisibility}}" />
                                         <Button Content="⏱ Отложить" Padding="10,3" FontSize="12" Margin="0,0,4,0" Click="Snooze_Click" />
+                                        <Button Content="📋" Padding="8,3" FontSize="12" Margin="0,0,4,0" ToolTip="Копировать текст"
+                                                Click="Copy_Click" />
                                         <Button Content="✎" Padding="8,3" FontSize="12" Margin="0,0,4,0" ToolTip="Изменить"
                                                 Visibility="{Binding IsMine, Converter={StaticResource BoolToVisibility}}" Click="Edit_Click" />
                                         <Button Content="🗑" Padding="8,3" FontSize="12" ToolTip="Удалить" Click="Delete_Click" />
                                     </StackPanel>
                                     <StackPanel Margin="12,8,4,8">
-                                        <TextBlock Text="{Binding Text}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
-                                                   Foreground="#111827" />
+                                        <!-- Текст можно выделить и скопировать (Ctrl+C) -->
+                                        <TextBox Text="{Binding Text, Mode=OneWay}" Style="{StaticResource SelectableText}"
+                                                 FontSize="14" FontWeight="SemiBold" PreviewMouseWheel="Text_PreviewMouseWheel" />
                                         <WrapPanel Margin="0,3,0,0">
                                             <Border CornerRadius="4" Padding="6,0" Margin="0,0,8,0" VerticalAlignment="Center"
                                                     Background="{Binding Color, Converter={StaticResource Brush}}">
