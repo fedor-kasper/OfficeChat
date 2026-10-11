@@ -21,6 +21,11 @@
              Link="Shared\Services\%(Filename)%(Extension)" />
   </ItemGroup>
 
+  <!-- Встроенные наборы стикеров (Microsoft Fluent Emoji, MIT) -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Assets\Stickers\**\*.png" LogicalName="Stickers/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Avalonia" Version="11.3.22" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
