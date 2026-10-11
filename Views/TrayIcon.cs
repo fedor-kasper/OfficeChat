@@ -21,6 +21,8 @@ public sealed class TrayIcon : IDisposable
     private bool _badgeVisible;
 
     public event Action? OpenRequested;
+    public event Action? NewReminderRequested;
+    public event Action? RemindersRequested;
     public event Action? ExitRequested;
 
     public TrayIcon()
@@ -28,6 +30,9 @@ public sealed class TrayIcon : IDisposable
         var menu = new Forms.ContextMenuStrip();
         var open = menu.Items.Add("Открыть", null, (_, _) => OpenRequested?.Invoke());
         open.Font = new Font(open.Font, System.Drawing.FontStyle.Bold);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add("⏰ Новое напоминание…", null, (_, _) => NewReminderRequested?.Invoke());
+        menu.Items.Add("Напоминания", null, (_, _) => RemindersRequested?.Invoke());
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add("Выход", null, (_, _) => ExitRequested?.Invoke());
 

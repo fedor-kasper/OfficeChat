@@ -251,18 +251,9 @@
             </ListBox>
         </DockPanel>
 
-        <!-- Правая часть: доска напоминаний -->
-        <local:RemindersPanel x:Name="RemindersView" Grid.Column="1" Visibility="Collapsed" />
+        <!-- Правая часть: доска напоминаний — видна, когда не открыта ни одна переписка -->
+        <local:RemindersPanel x:Name="RemindersView" Grid.Column="1" />
 
-        <!-- Правая часть: заглушка, пока никто не выбран -->
-        <StackPanel x:Name="EmptyPanel" Grid.Column="1"
-                    VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="360">
-            <TextBlock FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center"
-                       Text="Выберите, кому написать" />
-            <TextBlock Margin="0,8,0,0" TextAlignment="Center" TextWrapping="Wrap"
-                       Foreground="{StaticResource MutedTextBrush}"
-                       Text="Слева — компьютеры, на которых запущен OfficeChat. Чтобы написать всем сразу, выберите «Все»." />
-        </StackPanel>
 
         <!-- Правая часть: переписка -->
         <DockPanel x:Name="ChatPanel" Grid.Column="1" Visibility="Collapsed" AllowDrop="True"
