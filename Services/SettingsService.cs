@@ -16,6 +16,9 @@ public sealed class AppSettings
 
     /// <summary>Переписки, по которым не показывать всплывающие окна (по Id собеседника или группы).</summary>
     public List<Guid> MutedChats { get; set; } = new();
+
+    /// <summary>Недавно отправленные стикеры (по Id, последние — первыми).</summary>
+    public List<string> RecentStickers { get; set; } = new();
 }
 
 /// <summary>Хранит настройки в %AppData%\OfficeChat\settings.json.</summary>

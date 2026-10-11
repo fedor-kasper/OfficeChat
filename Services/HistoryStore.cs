@@ -71,6 +71,7 @@ public sealed class HistoryStore : IDisposable
         AddColumnIfMissing("sender_id", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("sender_name", "TEXT NOT NULL DEFAULT ''");
         AddColumnIfMissing("quiet", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("sticker", "INTEGER NOT NULL DEFAULT 0");
 
         Execute("""
             CREATE TABLE IF NOT EXISTS outbox (
@@ -347,9 +348,9 @@ public sealed class HistoryStore : IDisposable
         using var cmd = Command("""
             INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind,
                                   file_name, file_path, file_size, reply_to, reply_author, reply_text, edited,
-                                  sender_id, sender_name, quiet)
+                                  sender_id, sender_name, quiet, sticker)
             VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
-                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName, $quiet)
+                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName, $quiet, $sticker)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt,
                                            text = $text, edited = $edited
             """);
@@ -373,6 +374,7 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$senderId", message.SenderId?.ToString() ?? "");
         cmd.Parameters.AddWithValue("$senderName", message.SenderName);
         cmd.Parameters.AddWithValue("$quiet", message.IsQuiet);
+        cmd.Parameters.AddWithValue("$sticker", message.IsSticker);
         cmd.ExecuteNonQuery();
     }
 
@@ -493,9 +495,9 @@ public sealed class HistoryStore : IDisposable
 
     private const string MessageColumns =
         "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size, " +
-        "reply_to, reply_author, reply_text, edited, sender_id, sender_name, quiet";
+        "reply_to, reply_author, reply_text, edited, sender_id, sender_name, quiet, sticker";
 
-    private const int MessageColumnCount = 19;
+    private const int MessageColumnCount = 20;
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -537,6 +539,7 @@ public sealed class HistoryStore : IDisposable
             SenderId = senderId.Length > 0 ? Guid.Parse(senderId) : null,
             SenderName = reader.GetString(17),
             IsQuiet = reader.GetBoolean(18),
+            IsSticker = reader.GetBoolean(19),
         };
     }
 

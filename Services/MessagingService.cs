@@ -378,6 +378,9 @@ public sealed class ChatPacket
     /// <summary>Тихое сообщение — получатель показывает его маленьким уведомлением.</summary>
     public bool Quiet { get; set; }
 
+    /// <summary>Изображение — стикер (показывать без пузыря). Старые версии покажут как обычное изображение.</summary>
+    public bool Sticker { get; set; }
+
     public List<Guid>? MessageIds { get; set; }
 
     /// <summary>Ответ на сообщение: его Id, автор и начало текста (чтобы показать цитату, даже если оригинала нет).</summary>

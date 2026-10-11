@@ -53,12 +53,12 @@
                         </StackPanel>
                     </Border>
                     <!-- Изображение: превью в ленте, клик — просмотр, правый клик — сохранить/копировать -->
-                    <Border Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}"
+                    <Border x:Name="PictureFrame" Visibility="{Binding IsImage, Converter={StaticResource BoolToVisibility}}"
                             Margin="-6,-2,-6,4" CornerRadius="8" Background="#11000000" Cursor="Hand"
                             HorizontalAlignment="Left" ToolTip="{Binding FileName}"
                             MouseLeftButtonUp="Image_Click">
                         <Grid>
-                            <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
+                            <Image x:Name="Picture" Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}"
                                    MaxWidth="320" MaxHeight="320" Stretch="Uniform" StretchDirection="DownOnly"
                                    RenderOptions.BitmapScalingMode="HighQuality" />
                         </Grid>
@@ -68,6 +68,7 @@
                                 <MenuItem Header="Сохранить как…" Click="ImageSave_Click" />
                                 <MenuItem Header="Копировать" Click="ImageCopy_Click" />
                                 <MenuItem Header="Открыть в программе просмотра" Click="ImageOpenExternal_Click" />
+                                <MenuItem Header="Добавить в «Мои стикеры»" Click="SaveSticker_Click" />
                                 <Separator />
                                 <MenuItem Header="Ответить" Click="ReplyMessage_Click" />
                                 <MenuItem Header="Изменить подпись" Click="EditMessage_Click"
@@ -136,6 +137,15 @@
                     <Setter TargetName="Bubble" Property="Background" Value="#F3E8FF" />
                     <Setter TargetName="Bubble" Property="BorderBrush" Value="#D8B4FE" />
                     <Setter TargetName="Bubble" Property="BorderThickness" Value="1" />
+                </DataTrigger>
+                <!-- Стикер: картинка без пузырька, небольшая -->
+                <DataTrigger Binding="{Binding IsSticker}" Value="True">
+                    <Setter TargetName="Bubble" Property="Background" Value="Transparent" />
+                    <Setter TargetName="Bubble" Property="Padding" Value="0,2" />
+                    <Setter TargetName="PictureFrame" Property="Background" Value="Transparent" />
+                    <Setter TargetName="PictureFrame" Property="Margin" Value="0,0,0,2" />
+                    <Setter TargetName="Picture" Property="MaxWidth" Value="140" />
+                    <Setter TargetName="Picture" Property="MaxHeight" Value="140" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -352,6 +362,10 @@
                     <Button DockPanel.Dock="Left" Content="📎" Width="36" Margin="0,0,6,0" FontSize="16"
                             ToolTip="Прикрепить файл или изображение (также можно перетащить файлы в окно или вставить Ctrl+V)"
                             Click="Attach_Click" />
+                    <Button x:Name="StickersButton" DockPanel.Dock="Left" Content="😊" Width="36" Margin="0,0,6,0" FontSize="16"
+                            FontFamily="Segoe UI Emoji" ToolTip="Стикеры" Click="Stickers_Click" />
+                    <Popup x:Name="StickerPopup" PlacementTarget="{Binding ElementName=StickersButton}" Placement="Top"
+                           StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" />
                     <Button DockPanel.Dock="Right" Content="Отправить" Margin="6,0,0,0" Padding="16,0"
                             VerticalAlignment="Stretch" FontWeight="SemiBold" Style="{StaticResource FlatButton}"
                             Click="Send_Click" />
