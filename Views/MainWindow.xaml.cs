@@ -66,6 +66,8 @@ public partial class MainWindow : Window
 
         _tray = new TrayIcon();
         _tray.OpenRequested += ShowFromTray;
+        _tray.NewReminderRequested += () => RemindersView.CreateFromTray();
+        _tray.RemindersRequested += () => ShowReminders();
         _tray.ExitRequested += ExitApplication;
         _chat.UnreadChanged += OnUnreadChanged;
         TaskbarItemInfo = new System.Windows.Shell.TaskbarItemInfo();
@@ -265,8 +267,10 @@ public partial class MainWindow : Window
 
         if (_current == null)
         {
+            // Переписка не выбрана — на её месте доска напоминаний.
             ChatPanel.Visibility = Visibility.Collapsed;
-            EmptyPanel.Visibility = RemindersView.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+            RemindersView.Visibility = Visibility.Visible;
+            RemindersView.Refresh();
             return;
         }
         RemindersView.Visibility = Visibility.Collapsed;
@@ -274,7 +278,6 @@ public partial class MainWindow : Window
         _current.Messages.CollectionChanged += OnCurrentMessagesChanged;
         _current.PropertyChanged += OnCurrentContactChanged;
 
-        EmptyPanel.Visibility = Visibility.Collapsed;
         ChatPanel.Visibility = Visibility.Visible;
         ChatPanel.DataContext = _current;
         MessagesList.ItemsSource = _current.Messages;
@@ -842,7 +845,6 @@ public partial class MainWindow : Window
         ShowFromTray();
         RemindersView.Visibility = Visibility.Visible;
         ContactsList.SelectedItem = null;
-        EmptyPanel.Visibility = Visibility.Collapsed;
         ChatPanel.Visibility = Visibility.Collapsed;
         RemindersView.Refresh();
     }
