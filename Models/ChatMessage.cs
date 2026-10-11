@@ -159,6 +159,7 @@ public sealed class ChatMessage : INotifyPropertyChanged
     /// <summary>Короткий текст для уведомлений: у изображения — значок и подпись.</summary>
     public string PreviewText => Kind switch
     {
+        MessageKind.Image when IsSticker => "Стикер",
         MessageKind.Image => HasText ? $"🖼 {Text}" : "🖼 Изображение",
         MessageKind.File => HasText ? $"📎 {FileName}: {Text}" : $"📎 {FileName}",
         _ => Text,
@@ -172,6 +173,9 @@ public sealed class ChatMessage : INotifyPropertyChanged
     /// а не полным окном с красной рамкой.
     /// </summary>
     public bool IsQuiet { get; init; }
+
+    /// <summary>Стикер: картинка без пузыря и подписи (по сети и в базе — как изображение с пометкой).</summary>
+    public bool IsSticker { get; init; }
 
     // ---- Ответ, правка ----
 

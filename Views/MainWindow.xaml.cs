@@ -1,3 +1,4 @@
+using System.IO;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -582,6 +583,96 @@ public partial class MainWindow : Window
         var errors = new List<string>();
         AddAttachments(PendingAttachment.FromDataObject(e.Data, errors), errors);
         Activate();
+    }
+
+    // ---- Стикеры ----
+
+    private StickerPicker? _stickerPicker;
+
+    private void Stickers_Click(object sender, RoutedEventArgs e)
+    {
+        if (_current == null) return;
+        if (_stickerPicker == null)
+        {
+            _stickerPicker = new StickerPicker(_settings);
+            _stickerPicker.StickerChosen += SendSticker;
+            _stickerPicker.AddPackRequested += AddStickerPack;
+            _stickerPicker.DeletePackRequested += DeleteStickerPack;
+            StickerPopup.Child = _stickerPicker;
+        }
+        _stickerPicker.Reload();
+        StickerPopup.IsOpen = true;
+    }
+
+    private void SendSticker(Sticker sticker)
+    {
+        StickerPopup.IsOpen = false;
+        var contact = _current;
+        if (contact == null) return;
+        byte[] data;
+        try
+        {
+            data = sticker.Load();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ShowNotice($"Не удалось прочитать стикер: {ex.Message}");
+            return;
+        }
+        var replyTo = _editing == null ? _replyTo : null;
+        if (_editing == null) CancelCompose();
+        var quiet = QuietToggle.IsChecked == true;
+        QuietToggle.IsChecked = false;
+        var extension = sticker.Id.StartsWith("builtin/", StringComparison.Ordinal) ? ".png" : Path.GetExtension(sticker.Id);
+        var recipients = _chat.SendImage(contact, data, StickerPicker.PrettyName(sticker.Name) + extension, "",
+            replyTo, quiet, sticker: true);
+        StickerStore.MarkUsed(_settings, sticker);
+        if (contact.IsEveryone && recipients == 0)
+            ShowNotice("Сейчас никого нет в сети — стикер не отправлен.");
+        InputBox.Focus();
+    }
+
+    private void AddStickerPack()
+    {
+        StickerPopup.IsOpen = false;
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "Папка с картинками для набора стикеров" };
+        if (dialog.ShowDialog(this) != true) return;
+        var path = dialog.FolderName;
+        try
+        {
+            var count = StickerStore.AddPackFromFolder(path);
+            ShowNotice(count == 0
+                ? "В папке нет подходящих картинок (PNG, JPG, GIF, WEBP до 2 МБ)."
+                : $"Набор «{Path.GetFileName(path.TrimEnd('\\', '/'))}» добавлен: {count} {Plural(count, "стикер", "стикера", "стикеров")}.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error($"Не удалось добавить набор стикеров из {path}", ex);
+            ShowNotice($"Не удалось добавить набор: {ex.Message}");
+        }
+    }
+
+    private void DeleteStickerPack(StickerPack pack)
+    {
+        StickerPopup.IsOpen = false;
+        if (MessageBox.Show(this, $"Удалить набор стикеров «{pack.Title}»?", "Стикеры", MessageBoxButton.YesNo,
+                MessageBoxImage.Question, MessageBoxResult.No) != MessageBoxResult.Yes) return;
+        StickerStore.DeletePack(pack);
+        ShowNotice($"Набор «{pack.Title}» удалён.");
+    }
+
+    private void SaveSticker_Click(object sender, RoutedEventArgs e)
+    {
+        if (MessageOf(sender) is not { } message) return;
+        try
+        {
+            StickerStore.SaveToMyStickers(message.ImagePath, message.FileName);
+            ShowNotice($"Добавлено в «{StickerStore.MyPackTitle}» — набор в меню 😊.");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ShowNotice($"Не удалось сохранить стикер: {ex.Message}");
+        }
     }
 
     // ---- Изображения: просмотр и сохранение ----

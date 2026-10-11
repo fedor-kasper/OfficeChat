@@ -411,19 +411,19 @@ public sealed partial class ChatService : IDisposable
     /// отдельной копией. Возвращает число получателей.
     /// </summary>
     public int SendImage(Contact contact, byte[] data, string fileName, string caption, ChatMessage? replyTo = null,
-        bool quiet = false)
+        bool quiet = false, bool sticker = false)
     {
         var recipients = contact.IsEveryone
             ? _contactsByPeer.Values.Where(c => c.IsOnline).ToList()
             : new List<Contact> { contact };
         foreach (var recipient in recipients)
-            EnqueueImage(recipient, data, fileName, caption, contact.IsEveryone, replyTo, quiet);
+            EnqueueImage(recipient, data, fileName, caption, contact.IsEveryone, replyTo, quiet, sticker);
         Log.Info($"Изображение «{fileName}» ({data.Length / 1024} КБ) поставлено в очередь для {recipients.Count} получателей");
         return recipients.Count;
     }
 
     private void EnqueueImage(Contact contact, byte[] data, string fileName, string caption, bool isBroadcast,
-        ChatMessage? replyTo, bool quiet)
+        ChatMessage? replyTo, bool quiet, bool sticker)
     {
         var id = Guid.NewGuid();
         // У каждой копии свой файл: удаление одной переписки не трогает другие.
@@ -433,6 +433,7 @@ public sealed partial class ChatService : IDisposable
             Id = id,
             IsOutgoing = true,
             Kind = MessageKind.Image,
+            IsSticker = sticker,
             Text = caption,
             FileName = fileName,
             ImagePath = path,
@@ -856,6 +857,7 @@ public sealed partial class ChatService : IDisposable
             SentAt = new DateTimeOffset(message.Timestamp),
             IsBroadcast = message.IsBroadcast,
             Quiet = message.IsQuiet,
+            Sticker = message.IsSticker,
             FileName = message.FileName,
             ReplyToId = message.ReplyToId,
             // У себя автор цитаты — «Вы», а собеседнику нужно наше имя.
@@ -1014,6 +1016,7 @@ public sealed partial class ChatService : IDisposable
             Timestamp = packet.SentAt.LocalDateTime,
             IsBroadcast = packet.IsBroadcast,
             IsQuiet = packet.Quiet,
+            IsSticker = packet.Sticker && kind == MessageKind.Image,
             ReplyToId = packet.ReplyToId,
             // Ответили на наше сообщение — подписываем цитату «Вы», а не нашим именем.
             ReplyAuthor = packet.ReplyToId is { } replyTo && IsMyMessage(contact, replyTo) ? MyReplyAuthor : packet.ReplyAuthor,
