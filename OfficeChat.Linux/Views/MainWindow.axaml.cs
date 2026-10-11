@@ -75,6 +75,8 @@ public partial class MainWindow : Window
 
         _tray = new Tray();
         _tray.OpenRequested += ShowFromTray;
+        _tray.NewReminderRequested += async () => await RemindersView.CreateFromTrayAsync();
+        _tray.RemindersRequested += ShowReminders;
         _tray.ExitRequested += ExitApplication;
         _chat.UnreadChanged += () =>
         {
@@ -225,8 +227,10 @@ public partial class MainWindow : Window
 
         if (_current == null)
         {
+            // Переписка не выбрана — на её месте доска напоминаний.
             ChatPanel.IsVisible = false;
-            EmptyPanel.IsVisible = !RemindersView.IsVisible;
+            RemindersView.IsVisible = true;
+            RemindersView.Refresh();
             return;
         }
         RemindersView.IsVisible = false;
@@ -234,7 +238,6 @@ public partial class MainWindow : Window
         _current.Messages.CollectionChanged += OnCurrentMessagesChanged;
         _current.PropertyChanged += OnCurrentContactChanged;
 
-        EmptyPanel.IsVisible = false;
         ChatPanel.IsVisible = true;
         ChatPanel.DataContext = _current;
         MessagesList.ItemsSource = _current.Messages;
@@ -811,7 +814,6 @@ public partial class MainWindow : Window
         ShowFromTray();
         RemindersView.IsVisible = true;
         ContactsList.SelectedItem = null;
-        EmptyPanel.IsVisible = false;
         ChatPanel.IsVisible = false;
         RemindersView.Refresh();
     }

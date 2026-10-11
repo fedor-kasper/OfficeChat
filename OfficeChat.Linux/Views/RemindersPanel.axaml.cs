@@ -74,6 +74,29 @@ public partial class RemindersPanel : UserControl
         Refresh();
     }
 
+    /// <summary>
+    /// Новое напоминание из меню значка в трее: окно появляется поверх всех программ,
+    /// главное окно при этом не открывается.
+    /// </summary>
+    public async Task CreateFromTrayAsync()
+    {
+        if (_reminders == null) return;
+        var editor = new ReminderEditorWindow(null, _people(), "")
+        {
+            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+            Topmost = true,
+        };
+        var closed = new TaskCompletionSource();
+        editor.Closed += (_, _) => closed.TrySetResult();
+        editor.Show();
+        editor.Activate();
+        await closed.Task;
+        if (!editor.Saved) return;
+        _reminders.Create(editor.EnteredText, editor.DueAt, editor.Importance, editor.Repeat, editor.SelectedPeople);
+        _showDone = false;
+        Refresh();
+    }
+
     private async void Edit_Click(object? sender, RoutedEventArgs e)
     {
         if (_reminders == null || ReminderOf(sender) is not { IsMine: true } reminder || Owner is not { } owner) return;

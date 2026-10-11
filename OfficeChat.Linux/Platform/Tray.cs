@@ -19,12 +19,18 @@ public sealed class Tray : IDisposable
     private bool _badgeVisible;
 
     public event Action? OpenRequested;
+    public event Action? NewReminderRequested;
+    public event Action? RemindersRequested;
     public event Action? ExitRequested;
 
     public Tray()
     {
         var open = new NativeMenuItem("Открыть");
         open.Click += (_, _) => OpenRequested?.Invoke();
+        var newReminder = new NativeMenuItem("⏰ Новое напоминание…");
+        newReminder.Click += (_, _) => NewReminderRequested?.Invoke();
+        var reminders = new NativeMenuItem("Напоминания");
+        reminders.Click += (_, _) => RemindersRequested?.Invoke();
         var exit = new NativeMenuItem("Выход");
         exit.Click += (_, _) => ExitRequested?.Invoke();
 
@@ -32,7 +38,10 @@ public sealed class Tray : IDisposable
         {
             Icon = AppIcon.Normal,
             ToolTipText = "OfficeChat",
-            Menu = new NativeMenu { Items = { open, new NativeMenuItemSeparator(), exit } },
+            Menu = new NativeMenu
+            {
+                Items = { open, new NativeMenuItemSeparator(), newReminder, reminders, new NativeMenuItemSeparator(), exit },
+            },
             IsVisible = true,
         };
         _icon.Clicked += (_, _) => OpenRequested?.Invoke();
