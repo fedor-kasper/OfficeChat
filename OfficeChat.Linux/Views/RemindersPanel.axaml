@@ -60,13 +60,16 @@
                                         <Button Content="↩ Вернуть" Padding="10,3" FontSize="12" IsVisible="{Binding IsDone}"
                                                 Click="Reopen_Click" />
                                         <Button Content="⏱ Отложить" Padding="10,3" FontSize="12" Click="Snooze_Click" />
+                                        <Button Content="📋" Padding="8,3" FontSize="12" ToolTip.Tip="Копировать текст"
+                                                Click="Copy_Click" />
                                         <Button Content="✎" Padding="8,3" FontSize="12" ToolTip.Tip="Изменить"
                                                 IsVisible="{Binding IsMine}" Click="Edit_Click" />
                                         <Button Content="🗑" Padding="8,3" FontSize="12" ToolTip.Tip="Удалить" Click="Delete_Click" />
                                     </StackPanel>
                                     <StackPanel Margin="12,8,4,8" Spacing="3">
-                                        <TextBlock Text="{Binding Text}" FontSize="14" FontWeight="SemiBold" TextWrapping="Wrap"
-                                                   Foreground="#111827" />
+                                        <!-- Текст можно выделить и скопировать (Ctrl+C, правый клик) -->
+                                        <SelectableTextBlock Text="{Binding Text}" FontSize="14" FontWeight="SemiBold"
+                                                             TextWrapping="Wrap" Foreground="#111827" />
                                         <WrapPanel>
                                             <Border CornerRadius="4" Padding="6,0" Margin="0,0,8,0" VerticalAlignment="Center"
                                                     Background="{Binding Color, Converter={StaticResource Brush}}">

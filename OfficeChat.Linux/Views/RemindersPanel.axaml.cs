@@ -106,6 +106,22 @@ public partial class RemindersPanel : UserControl
             _reminders.Update(reminder, editor.EnteredText, editor.DueAt, editor.Importance, editor.Repeat, editor.SelectedPeople);
     }
 
+    private void Copy_Click(object? sender, RoutedEventArgs e)
+    {
+        if (ReminderOf(sender) is { } reminder && sender is Button button)
+            CopyText(reminder.Text, button);
+    }
+
+    /// <summary>Скопировать текст напоминания; на кнопке ненадолго появляется «✓».</summary>
+    internal static async void CopyText(string text, Button button)
+    {
+        if (TopLevel.GetTopLevel(button)?.Clipboard is not { } clipboard) return;
+        await clipboard.SetTextAsync(text);
+        var content = button.Content;
+        button.Content = "✓";
+        Avalonia.Threading.DispatcherTimer.RunOnce(() => button.Content = content, TimeSpan.FromSeconds(1.2));
+    }
+
     private void Done_Click(object? sender, RoutedEventArgs e)
     {
         if (ReminderOf(sender) is { } reminder) _reminders?.Complete(reminder);

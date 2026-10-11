@@ -21,13 +21,15 @@
                     </StackPanel>
                 </DockPanel>
             </Border>
-            <TextBlock x:Name="BodyText" Margin="14,10,14,0" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
+            <SelectableTextBlock x:Name="BodyText" Margin="14,10,14,0" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
             <StackPanel Orientation="Horizontal" Margin="14,12,14,12" Spacing="6">
                 <Button Content="✓ Готово" Padding="14,5" FontSize="13" FontWeight="SemiBold" Classes="flat"
                         Background="#16A34A" Click="Done_Click" />
                 <Button x:Name="SnoozeButton" Content="⏱ Отложить ▾" Padding="12,5" FontSize="13" Click="Snooze_Click" />
                 <Button Content="Доска" Padding="10,5" FontSize="13" Classes="plain" Foreground="#2563EB"
                         ToolTip.Tip="Открыть доску напоминаний" Click="Open_Click" />
+                <Button x:Name="CopyButton" Content="📋" Padding="8,5" FontSize="13" Classes="plain"
+                        ToolTip.Tip="Копировать текст" Click="Copy_Click" />
             </StackPanel>
         </StackPanel>
     </Border>
