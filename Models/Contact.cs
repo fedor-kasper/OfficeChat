@@ -75,6 +75,22 @@ public sealed class Contact : INotifyPropertyChanged
     }
     private bool _isMuted;
 
+    /// <summary>Закреплена: всегда вверху списка.</summary>
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set
+        {
+            if (_isPinned == value) return;
+            _isPinned = value;
+            OnPropertyChanged();
+        }
+    }
+    private bool _isPinned;
+
+    /// <summary>Время последнего сообщения — по нему список упорядочен (новые вверху).</summary>
+    public DateTime LastActivity => Messages.Count > 0 ? Messages[^1].Timestamp : DateTime.MinValue;
+
     /// <summary>«печатает…» (в группе — с именем); пусто, если никто не печатает.</summary>
     public string TypingText
     {
@@ -113,6 +129,7 @@ public sealed class Contact : INotifyPropertyChanged
     {
         Peer = peer;
         Group = group;
+        Messages.CollectionChanged += (_, _) => OnPropertyChanged(nameof(LastActivity));
         if (group != null)
             group.PropertyChanged += (_, _) =>
             {

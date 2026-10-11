@@ -47,6 +47,13 @@ public partial class MainWindow : Window
         _chat.PresenceChanged += OnPresenceChanged;
         _chat.MessageReceived += OnMessageReceived;
         ContactsList.ItemsSource = _chat.Contacts;
+        // Список упорядочен по последнему сообщению: открытая переписка, переехав вверх, остаётся выбранной.
+        _chat.Contacts.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == NotifyCollectionChangedAction.Move && _current != null && e.OldItems?.Contains(_current) == true &&
+                ContactsList.SelectedItem != _current)
+                ContactsList.SelectedItem = _current;
+        };
 
         _notifications = new NotificationManager(_chat, OpenConversation);
         _chat.MessageRemoved += (_, message) =>
@@ -254,6 +261,7 @@ public partial class MainWindow : Window
 
     private void ContactsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        if (_chat.IsReordering) return;
         if (_current != null)
         {
             _current.Messages.CollectionChanged -= OnCurrentMessagesChanged;
@@ -1007,6 +1015,8 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        var pin = new MenuItem { Header = contact.IsPinned ? "Открепить" : "📌 Закрепить" };
+        pin.Click += (_, _) => _chat.SetPinned(contact, !contact.IsPinned);
         if (contact.IsGroup)
         {
             var members = new MenuItem { Header = "Участники…" };
@@ -1017,7 +1027,7 @@ public partial class MainWindow : Window
             groupClear.Click += (_, _) => ConfirmClear(contact);
             var leave = new MenuItem { Header = "Выйти из группы" };
             leave.Click += (_, _) => ConfirmLeave(contact);
-            ContactsList.ContextMenu = new ContextMenu { Items = { members, groupMute, new Separator(), groupClear, leave } };
+            ContactsList.ContextMenu = new ContextMenu { Items = { pin, members, groupMute, new Separator(), groupClear, leave } };
             return;
         }
 
@@ -1036,7 +1046,7 @@ public partial class MainWindow : Window
         ToolTipService.SetShowOnDisabled(remove, true);
         remove.Click += (_, _) => ConfirmRemove(contact);
 
-        ContactsList.ContextMenu = new ContextMenu { Items = { mute, new Separator(), clear, remove } };
+        ContactsList.ContextMenu = new ContextMenu { Items = { pin, mute, new Separator(), clear, remove } };
     }
 
     private void ConfirmClear(Contact contact)

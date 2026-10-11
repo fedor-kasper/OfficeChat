@@ -17,6 +17,9 @@ public sealed class AppSettings
     /// <summary>Переписки, по которым не показывать всплывающие окна (по Id собеседника или группы).</summary>
     public List<Guid> MutedChats { get; set; } = new();
 
+    /// <summary>Закреплённые переписки: всегда вверху списка (по Id собеседника или группы).</summary>
+    public List<Guid> PinnedChats { get; set; } = new();
+
     /// <summary>Недавно отправленные стикеры (по Id, последние — первыми).</summary>
     public List<string> RecentStickers { get; set; } = new();
 }

@@ -231,6 +231,9 @@
                                                VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
                                                ToolTip="Уведомления выключены"
                                                Visibility="{Binding IsMuted, Converter={StaticResource BoolToVisibility}}" />
+                                    <TextBlock DockPanel.Dock="Right" Text="📌" FontSize="11" Margin="4,0,0,0"
+                                               FontFamily="Segoe UI Emoji" VerticalAlignment="Center" ToolTip="Закреплено"
+                                               Visibility="{Binding IsPinned, Converter={StaticResource BoolToVisibility}}" />
                                     <TextBlock x:Name="TitleText" Text="{Binding Title}" FontSize="14"
                                                TextTrimming="CharacterEllipsis" />
                                 </DockPanel>
