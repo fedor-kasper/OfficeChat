@@ -106,6 +106,48 @@ public partial class RemindersPanel : UserControl
             _reminders.Update(reminder, editor.EnteredText, editor.DueAt, editor.Importance, editor.Repeat, editor.SelectedPeople);
     }
 
+    private void Copy_Click(object sender, RoutedEventArgs e)
+    {
+        if (ReminderOf(sender) is { } reminder && sender is Button button)
+            CopyText(reminder.Text, button);
+    }
+
+    /// <summary>Скопировать текст напоминания; на кнопке ненадолго появляется «✓».</summary>
+    internal static void CopyText(string text, Button button)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            // Буфер обмена занят другой программой.
+            Log.Warn("Не удалось скопировать текст напоминания", ex);
+            return;
+        }
+        var content = button.Content;
+        button.Content = "✓";
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(1.2) };
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            button.Content = content;
+        };
+        timer.Start();
+    }
+
+    // Выделяемый текст (TextBox) не должен забирать прокрутку колёсиком у доски.
+    private void Text_PreviewMouseWheel(object sender, System.Windows.Input.MouseWheelEventArgs e)
+    {
+        if (sender is not FrameworkElement { Parent: UIElement parent }) return;
+        e.Handled = true;
+        parent.RaiseEvent(new System.Windows.Input.MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = UIElement.MouseWheelEvent,
+            Source = sender,
+        });
+    }
+
     private void Done_Click(object sender, RoutedEventArgs e)
     {
         if (ReminderOf(sender) is { } reminder) _reminders?.Complete(reminder);

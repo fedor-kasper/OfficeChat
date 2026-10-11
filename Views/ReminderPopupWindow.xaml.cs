@@ -64,6 +64,8 @@ public partial class ReminderPopupWindow : Window, IStackedPopup
 
     private void Open_Click(object sender, RoutedEventArgs e) => OpenRequested?.Invoke(this);
 
+    private void Copy_Click(object sender, RoutedEventArgs e) => RemindersPanel.CopyText(Reminder.Text, CopyButton);
+
     private void Close_Click(object sender, RoutedEventArgs e)
     {
         Dismissed?.Invoke(this);

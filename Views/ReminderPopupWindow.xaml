@@ -24,7 +24,7 @@
                     </StackPanel>
                 </DockPanel>
             </Border>
-            <TextBlock x:Name="BodyText" Margin="14,10,14,0" FontSize="15" TextWrapping="Wrap" Foreground="#111827" />
+            <TextBox x:Name="BodyText" Margin="14,10,14,0" FontSize="15" Style="{StaticResource SelectableText}" />
             <StackPanel Orientation="Horizontal" Margin="14,12,14,12">
                 <Button Content="✓ Готово" Padding="14,5" FontSize="13" FontWeight="SemiBold" Margin="0,0,6,0"
                         Style="{StaticResource FlatButton}" Background="#16A34A" Click="Done_Click" />
@@ -32,6 +32,8 @@
                         Click="Snooze_Click" />
                 <Button Content="Доска" Padding="10,5" FontSize="13" Background="Transparent" BorderBrush="Transparent"
                         Foreground="#2563EB" ToolTip="Открыть доску напоминаний" Click="Open_Click" />
+                <Button x:Name="CopyButton" Content="📋" Padding="8,5" FontSize="13" Background="Transparent"
+                        BorderBrush="Transparent" ToolTip="Копировать текст" Click="Copy_Click" />
             </StackPanel>
         </StackPanel>
     </Border>
