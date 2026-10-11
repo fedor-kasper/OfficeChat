@@ -55,6 +55,13 @@ public partial class MainWindow : Window
         _chat.PresenceChanged += OnPresenceChanged;
         _chat.MessageReceived += OnMessageReceived;
         ContactsList.ItemsSource = _chat.Contacts;
+        // Список упорядочен по последнему сообщению: открытая переписка, переехав вверх, остаётся выбранной.
+        _chat.Contacts.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == NotifyCollectionChangedAction.Move && _current != null && e.OldItems?.Contains(_current) == true &&
+                ContactsList.SelectedItem != _current)
+                ContactsList.SelectedItem = _current;
+        };
 
         _notifications = new NotificationManager(_chat, OpenConversation);
         _chat.MessageRemoved += (_, message) =>
@@ -213,6 +220,7 @@ public partial class MainWindow : Window
 
     private void ContactsList_SelectionChanged(object? sender, SelectionChangedEventArgs e)
     {
+        if (_chat.IsReordering) return;
         if (_current != null)
         {
             _current.Messages.CollectionChanged -= OnCurrentMessagesChanged;
@@ -979,6 +987,8 @@ public partial class MainWindow : Window
             e.Handled = true;
             return;
         }
+        var pin = new MenuItem { Header = contact.IsPinned ? "Открепить" : "📌 Закрепить" };
+        pin.Click += (_, _) => _chat.SetPinned(contact, !contact.IsPinned);
         if (contact.IsGroup)
         {
             var members = new MenuItem { Header = "Участники…" };
@@ -989,7 +999,7 @@ public partial class MainWindow : Window
             groupClear.Click += async (_, _) => await ConfirmClear(contact);
             var leave = new MenuItem { Header = "Выйти из группы" };
             leave.Click += async (_, _) => await ConfirmLeave(contact);
-            new ContextMenu { ItemsSource = new Control[] { members, groupMute, new Separator(), groupClear, leave } }
+            new ContextMenu { ItemsSource = new Control[] { pin, members, groupMute, new Separator(), groupClear, leave } }
                 .Open(ContactsList);
             e.Handled = true;
             return;
@@ -1002,7 +1012,7 @@ public partial class MainWindow : Window
         var remove = new MenuItem { Header = "Удалить из списка", IsEnabled = contact.CanRemove };
         remove.Click += async (_, _) => await ConfirmRemove(contact);
 
-        var menu = new ContextMenu { ItemsSource = new Control[] { mute, new Separator(), clear, remove } };
+        var menu = new ContextMenu { ItemsSource = new Control[] { pin, mute, new Separator(), clear, remove } };
         menu.Open(ContactsList);
         e.Handled = true;
     }

@@ -159,6 +159,9 @@
                                     <TextBlock DockPanel.Dock="Right" Text="🔕" FontSize="11" Margin="4,0,0,0"
                                                VerticalAlignment="Center" ToolTip.Tip="Уведомления выключены"
                                                IsVisible="{Binding IsMuted}" />
+                                    <TextBlock DockPanel.Dock="Right" Text="📌" FontSize="11" Margin="4,0,0,0"
+                                               VerticalAlignment="Center" ToolTip.Tip="Закреплено"
+                                               IsVisible="{Binding IsPinned}" />
                                     <TextBlock Text="{Binding Title}" FontSize="14" TextTrimming="CharacterEllipsis" />
                                 </DockPanel>
                                 <TextBlock Text="{Binding Subtitle}" FontSize="11" Classes="subtitle"
