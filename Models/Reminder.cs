@@ -130,6 +130,12 @@ public sealed class Reminder : INotifyPropertyChanged
     public string CreatorName { get; init; } = "";
     public DateTime CreatedAt { get; init; }
 
+    /// <summary>
+    /// Версия от автора (время последнего изменения, UTC-такты). Копия может прийти через других
+    /// с опозданием — более старая версия не перезаписывает новую.
+    /// </summary>
+    public long Revision { get; set; }
+
     /// <summary>Кому ещё отправлено (без автора).</summary>
     public List<ReminderParticipant> Participants
     {

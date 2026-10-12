@@ -58,7 +58,7 @@ public sealed partial class ChatService : IDisposable
     public event Action<Contact, ChatMessage>? MessageRemoved;
 
     /// <summary>Пришёл пакет напоминания (обрабатывает <see cref="ReminderService"/>).</summary>
-    public event Action<Contact, ChatPacket>? ReminderPacketReceived;
+    public event Action<Guid, ChatPacket>? ReminderPacketReceived;
 
     /// <summary>Пришёл пакет обновления программы (обрабатывает <see cref="UpdateService"/>).</summary>
     public event Action<Contact, ChatPacket>? UpdatePacketReceived;
@@ -106,6 +106,7 @@ public sealed partial class ChatService : IDisposable
         _typingTimer.Tick += (_, _) => ExpireTyping();
 
         _outbox = _store.LoadOutbox();
+        _store.PruneRelays(RelayLifetime);
         LoadHistory();
     }
 
@@ -658,7 +659,9 @@ public sealed partial class ChatService : IDisposable
     /// <summary>Ставит служебный пакет в очередь собеседнику; уйдёт по порядку, когда он будет в сети.</summary>
     private void EnqueuePacket(Guid peerId, ChatPacket packet)
     {
-        _outbox.Add(_store.AddOutbox(peerId, JsonSerializer.Serialize(packet)));
+        var item = _store.AddOutbox(peerId, JsonSerializer.Serialize(packet));
+        _outbox.Add(item);
+        OfferRelay(item);
         _ = FlushAsync(peerId);
     }
 
@@ -719,6 +722,7 @@ public sealed partial class ChatService : IDisposable
         foreach (var peerId in _contactsByPeer.Keys
                      .Concat(_outbox.Select(o => o.PeerId))
                      .Concat(_store.PeersWithPendingGroupDeliveries())
+                     .Concat(_store.PendingRelays().Select(r => r.TargetId))
                      .Distinct().ToList())
             _ = FlushAsync(peerId);
     }
@@ -736,7 +740,8 @@ public sealed partial class ChatService : IDisposable
         if (peer == null) return;
         var hasWork = _outbox.Any(o => o.PeerId == peerId) || (contact != null && contact.Messages.Any(m =>
             (m.IsOutgoing && m.Status == MessageStatus.Queued) ||
-            (!m.IsOutgoing && m.IsRead && !m.ReadReceiptSent))) || _store.PendingGroupDeliveries(peerId).Count > 0;
+            (!m.IsOutgoing && m.IsRead && !m.ReadReceiptSent))) || _store.PendingGroupDeliveries(peerId).Count > 0 ||
+            _store.PendingRelays(peerId).Count > 0;
         if (!hasWork || peer.Address.Equals(IPAddress.None) || !_flushing.Add(peer.Id)) return;
         // Даже если обнаружение считает собеседника ушедшим, пробуем напрямую по последнему адресу:
         // UDP-рассылку может резать брандмауэр, а TCP при этом работать.
@@ -746,6 +751,8 @@ public sealed partial class ChatService : IDisposable
             // Служебные пакеты (в том числе «вас добавили в группу») — раньше сообщений групп.
             if (!await FlushOutboxAsync(peer)) return;
             await FlushGroupMessagesAsync(peer);
+            // Хранимое за других — тоже ему.
+            await FlushRelaysAsync(peer);
         }
         finally
         {
@@ -939,7 +946,10 @@ public sealed partial class ChatService : IDisposable
             case ChatPacket.ReminderShare:
             case ChatPacket.ReminderDelete:
             case ChatPacket.ReminderDone:
-                ReminderPacketReceived?.Invoke(contact, packet);
+                DispatchReminderPacket(contact.Peer!.Id, packet);
+                break;
+            case ChatPacket.Relay:
+                OnRelay(packet);
                 break;
             case ChatPacket.UpdateRequest:
             case ChatPacket.UpdatePackage:
@@ -1070,6 +1080,7 @@ public sealed partial class ChatService : IDisposable
         UpdateGroupStatuses();
         PresenceChanged?.Invoke();
         _ = FlushAsync(contact);
+        OfferRelaysTo(peer);
     }
 
     private void OnPeerOffline(Peer peer)
