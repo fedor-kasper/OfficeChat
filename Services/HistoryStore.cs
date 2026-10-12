@@ -15,6 +15,9 @@ public sealed record StoredContact(Guid Id, string Name, string Machine, IPAddre
 /// </summary>
 public sealed record OutboxItem(long Seq, Guid PeerId, string PacketJson);
 
+/// <summary>Чужой служебный пакет, который мы храним и передадим получателю, когда он появится в сети.</summary>
+public sealed record RelayItem(Guid Id, Guid TargetId, Guid OriginId, string PacketJson);
+
 /// <summary>
 /// История переписки в локальной базе SQLite (%AppData%\OfficeChat\history.db).
 /// Хранится всё: сообщения, их статусы, очередь неотправленных.
@@ -96,6 +99,20 @@ public sealed class HistoryStore : IDisposable
             CREATE TABLE IF NOT EXISTS left_groups (id TEXT PRIMARY KEY);
             -- Напоминания: каждое целиком в JSON (полей много, искать по ним не нужно).
             CREATE TABLE IF NOT EXISTS reminders (id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            -- Удалённые напоминания: запоздавшая копия не должна вернуть их на доску.
+            CREATE TABLE IF NOT EXISTS reminder_tombstones (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+            -- Пересылка: чужие пакеты для тех, кто не в сети (delivered = 1 — уже передали, храним, чтобы не взять снова).
+            CREATE TABLE IF NOT EXISTS relay (
+                id        TEXT PRIMARY KEY,
+                target    TEXT NOT NULL,
+                origin    TEXT NOT NULL,
+                packet    TEXT NOT NULL,
+                received  INTEGER NOT NULL,
+                delivered INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS ix_relay_target ON relay (target, delivered);
+            -- Уже обработанные пакеты, которые могут прийти несколько раз (напрямую и через пересылку).
+            CREATE TABLE IF NOT EXISTS seen_packets (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
             """);
     }
 
@@ -298,6 +315,85 @@ public sealed class HistoryStore : IDisposable
     {
         using var cmd = Command("DELETE FROM reminders WHERE id = $id");
         cmd.Parameters.AddWithValue("$id", id.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    public void AddReminderTombstone(Guid id)
+    {
+        using var cmd = Command("INSERT OR IGNORE INTO reminder_tombstones (id, at) VALUES ($id, $at)");
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        cmd.Parameters.AddWithValue("$at", DateTime.UtcNow.Ticks);
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool IsReminderDeleted(Guid id)
+    {
+        using var cmd = Command("SELECT 1 FROM reminder_tombstones WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        return cmd.ExecuteScalar() != null;
+    }
+
+    // ---- Пересылка за других ----
+
+    /// <summary>Сохранить пакет для пересылки. false — такой уже есть (или уже передан).</summary>
+    public bool AddRelay(RelayItem item)
+    {
+        using var cmd = Command("""
+            INSERT OR IGNORE INTO relay (id, target, origin, packet, received)
+            VALUES ($id, $target, $origin, $packet, $received)
+            """);
+        cmd.Parameters.AddWithValue("$id", item.Id.ToString());
+        cmd.Parameters.AddWithValue("$target", item.TargetId.ToString());
+        cmd.Parameters.AddWithValue("$origin", item.OriginId.ToString());
+        cmd.Parameters.AddWithValue("$packet", item.PacketJson);
+        cmd.Parameters.AddWithValue("$received", DateTime.UtcNow.Ticks);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>Ещё не переданные пакеты (всем или одному получателю) — в порядке получения.</summary>
+    public List<RelayItem> PendingRelays(Guid? targetId = null)
+    {
+        using var cmd = Command(targetId == null
+            ? "SELECT id, target, origin, packet FROM relay WHERE delivered = 0 ORDER BY rowid"
+            : "SELECT id, target, origin, packet FROM relay WHERE delivered = 0 AND target = $target ORDER BY rowid");
+        if (targetId != null) cmd.Parameters.AddWithValue("$target", targetId.Value.ToString());
+        using var reader = cmd.ExecuteReader();
+        var result = new List<RelayItem>();
+        while (reader.Read())
+            result.Add(new RelayItem(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
+                Guid.Parse(reader.GetString(2)), reader.GetString(3)));
+        return result;
+    }
+
+    public void MarkRelayDelivered(Guid id)
+    {
+        using var cmd = Command("UPDATE relay SET delivered = 1 WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", id.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Отметить пакет обработанным. false — он уже был (повтор).</summary>
+    public bool MarkSeen(Guid packetId)
+    {
+        using var cmd = Command("INSERT OR IGNORE INTO seen_packets (id, at) VALUES ($id, $at)");
+        cmd.Parameters.AddWithValue("$id", packetId.ToString());
+        cmd.Parameters.AddWithValue("$at", DateTime.UtcNow.Ticks);
+        return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
+    /// Забыть старое: пересылку — через <paramref name="relayLifetime"/>, отметки о повторах и удалённых
+    /// напоминаниях — вдвое позже (дольше, чем может прийти запоздавшая копия).
+    /// </summary>
+    public void PruneRelays(TimeSpan relayLifetime)
+    {
+        using var cmd = Command("""
+            DELETE FROM relay WHERE received < $relay;
+            DELETE FROM seen_packets WHERE at < $marks;
+            DELETE FROM reminder_tombstones WHERE at < $marks;
+            """);
+        cmd.Parameters.AddWithValue("$relay", (DateTime.UtcNow - relayLifetime).Ticks);
+        cmd.Parameters.AddWithValue("$marks", (DateTime.UtcNow - relayLifetime * 2).Ticks);
         cmd.ExecuteNonQuery();
     }
 

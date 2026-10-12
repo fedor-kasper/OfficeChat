@@ -80,6 +80,7 @@ public sealed class ReminderService : IDisposable
             CreatorId = _chat.MyId,
             CreatorName = _chat.MyName,
             CreatedAt = DateTime.Now,
+            Revision = DateTime.UtcNow.Ticks,
             Participants = people.Where(p => p.IsPerson)
                 .Select(p => new ReminderParticipant(p.Peer!.Id, p.Title, false)).ToList(),
         };
@@ -112,6 +113,7 @@ public sealed class ReminderService : IDisposable
             reminder.SnoozedUntil = null;
             Schedule(reminder);
         }
+        reminder.Revision = Math.Max(DateTime.UtcNow.Ticks, reminder.Revision + 1);
         Save(reminder);
         Share(reminder);
         Changed?.Invoke();
@@ -137,8 +139,8 @@ public sealed class ReminderService : IDisposable
             reminder.IsAlerting = false;
             reminder.NextAlertAt = null;
         }
-        Save(reminder);
         SendDone(reminder, done: true);
+        Save(reminder);
         Changed?.Invoke();
     }
 
@@ -150,8 +152,8 @@ public sealed class ReminderService : IDisposable
         reminder.DoneAt = null;
         reminder.SnoozedUntil = null;
         Schedule(reminder);
-        Save(reminder);
         SendDone(reminder, done: false);
+        Save(reminder);
         Changed?.Invoke();
     }
 
@@ -183,6 +185,8 @@ public sealed class ReminderService : IDisposable
     {
         Reminders.Remove(reminder);
         _chat.Store.DeleteReminder(reminder.Id);
+        // Запоздавшая копия (переданная через коллег) не должна вернуть напоминание на доску.
+        _chat.Store.AddReminderTombstone(reminder.Id);
         if (reminder.IsMine)
         {
             foreach (var participant in reminder.Participants)
@@ -267,17 +271,19 @@ public sealed class ReminderService : IDisposable
         MarkParticipant(reminder, _chat.MyId, done);
     }
 
-    private void OnPacket(Contact contact, ChatPacket packet)
+    private void OnPacket(Guid from, ChatPacket packet)
     {
-        var from = contact.Peer!.Id;
         switch (packet.Type)
         {
             case ChatPacket.ReminderShare:
                 OnShared(packet.Text, from);
                 break;
             case ChatPacket.ReminderDelete:
-                if (Reminders.FirstOrDefault(r => r.Id == packet.TargetId) is { IsMine: false } removed &&
-                    removed.CreatorId == from)
+                var removed = Reminders.FirstOrDefault(r => r.Id == packet.TargetId);
+                // Удаление может прийти раньше самого напоминания (через разных коллег) — запоминаем его.
+                if (removed == null || removed is { IsMine: false } && removed.CreatorId == from)
+                    _chat.Store.AddReminderTombstone(packet.TargetId);
+                if (removed is { IsMine: false } && removed.CreatorId == from)
                 {
                     Reminders.Remove(removed);
                     _chat.Store.DeleteReminder(removed.Id);
@@ -307,12 +313,15 @@ public sealed class ReminderService : IDisposable
         {
             return;
         }
-        // Изменять напоминание может только его автор.
-        if (shared == null || shared.CreatorId != from) return;
+        // Изменять напоминание может только его автор; удалённое не возвращаем.
+        if (shared == null || shared.CreatorId != from || _chat.Store.IsReminderDeleted(shared.Id)) return;
 
         var existing = Reminders.FirstOrDefault(r => r.Id == shared.Id);
         if (existing != null)
         {
+            // Запоздавшая старая версия (пришла через коллег позже новой) — пропускаем.
+            if (shared.Revision != 0 && shared.Revision <= existing.Revision) return;
+            existing.Revision = shared.Revision;
             var due = shared.DueAt?.LocalDateTime;
             var timeChanged = existing.DueAt != due;
             existing.Text = shared.Text;
@@ -342,6 +351,7 @@ public sealed class ReminderService : IDisposable
             CreatedAt = DateTime.Now,
             Participants = shared.Participants,
             IsMine = false,
+            Revision = shared.Revision,
         };
         Schedule(reminder);
         Reminders.Add(reminder);
@@ -389,6 +399,7 @@ public sealed class ReminderService : IDisposable
                 CreatorId = s.CreatorId,
                 CreatorName = s.CreatorName,
                 CreatedAt = s.CreatedAt,
+                Revision = s.Revision,
                 Participants = s.Participants ?? new(),
                 IsMine = s.CreatorId == _chat.MyId,
             };
@@ -405,12 +416,14 @@ public sealed class ReminderService : IDisposable
         Id = r.Id, Text = r.Text, DueAt = r.DueAt, Importance = r.Importance, Repeat = r.Repeat, IsDone = r.IsDone,
         DoneAt = r.DoneAt, SnoozedUntil = r.SnoozedUntil, NextAlertAt = r.NextAlertAt, IsAlerting = r.IsAlerting,
         CreatorId = r.CreatorId, CreatorName = r.CreatorName, CreatedAt = r.CreatedAt, Participants = r.Participants,
+        Revision = r.Revision,
     };
 
     private static SharedReminder ToShared(Reminder r) => new()
     {
         Id = r.Id, Text = r.Text, DueAt = r.DueAt is { } due ? new DateTimeOffset(due) : null, Importance = r.Importance,
         Repeat = r.Repeat, CreatorId = r.CreatorId, CreatorName = r.CreatorName, Participants = r.Participants,
+        Revision = r.Revision,
     };
 
     private sealed class StoredReminder
@@ -429,6 +442,7 @@ public sealed class ReminderService : IDisposable
         public string CreatorName { get; set; } = "";
         public DateTime CreatedAt { get; set; }
         public List<ReminderParticipant>? Participants { get; set; }
+        public long Revision { get; set; }
     }
 
     /// <summary>Что получает участник: без личного состояния автора (отложено, выполнено).</summary>
@@ -442,6 +456,7 @@ public sealed class ReminderService : IDisposable
         public Guid CreatorId { get; set; }
         public string CreatorName { get; set; } = "";
         public List<ReminderParticipant> Participants { get; set; } = new();
+        public long Revision { get; set; }
     }
 
     public void Dispose()

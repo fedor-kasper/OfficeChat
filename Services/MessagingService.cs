@@ -337,6 +337,12 @@ public sealed class ChatPacket
     /// <summary>Подтверждение приёма пакета с тем же <see cref="Id"/>.</summary>
     public const string Ack = "ack";
 
+    /// <summary>
+    /// Пересылка за другого: в <see cref="Text"/> — исходный пакет (с подписью автора), <see cref="TargetId"/> — кому.
+    /// Если получатель — мы, обрабатываем вложенный пакет; иначе храним и передадим, когда получатель появится.
+    /// </summary>
+    public const string Relay = "relay";
+
     // Мини-игры: все пакеты относятся к партии <see cref="GameId"/>; вид игры — в приглашении (<see cref="GameKind"/>).
     public const string GameInvite = "game-invite";
     public const string GameAccept = "game-accept";
