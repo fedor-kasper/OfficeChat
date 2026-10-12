@@ -16,7 +16,7 @@ public sealed record StoredContact(Guid Id, string Name, string Machine, IPAddre
 public sealed record OutboxItem(long Seq, Guid PeerId, string PacketJson);
 
 /// <summary>Чужой служебный пакет, который мы храним и передадим получателю, когда он появится в сети.</summary>
-public sealed record RelayItem(Guid Id, Guid TargetId, Guid OriginId, string PacketJson);
+public sealed record RelayItem(Guid Id, Guid TargetId, Guid OriginId, string PacketJson, string? PayloadPath = null);
 
 /// <summary>
 /// История переписки в локальной базе SQLite (%AppData%\OfficeChat\history.db).
@@ -113,7 +113,11 @@ public sealed class HistoryStore : IDisposable
             CREATE INDEX IF NOT EXISTS ix_relay_target ON relay (target, delivered);
             -- Уже обработанные пакеты, которые могут прийти несколько раз (напрямую и через пересылку).
             CREATE TABLE IF NOT EXISTS seen_packets (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+            -- Свои сообщения, копии которых отданы коллегам на пересылку (отмена должна догнать копии).
+            CREATE TABLE IF NOT EXISTS relayed_messages (id TEXT PRIMARY KEY);
             """);
+        // Вложение (изображение) у пересылаемого пакета.
+        AddColumnIfMissing("relay", "payload", "TEXT NOT NULL DEFAULT ''");
     }
 
     // ---- Контакты ----
@@ -339,9 +343,10 @@ public sealed class HistoryStore : IDisposable
     public bool AddRelay(RelayItem item)
     {
         using var cmd = Command("""
-            INSERT OR IGNORE INTO relay (id, target, origin, packet, received)
-            VALUES ($id, $target, $origin, $packet, $received)
+            INSERT OR IGNORE INTO relay (id, target, origin, packet, received, payload)
+            VALUES ($id, $target, $origin, $packet, $received, $payload)
             """);
+        cmd.Parameters.AddWithValue("$payload", item.PayloadPath ?? "");
         cmd.Parameters.AddWithValue("$id", item.Id.ToString());
         cmd.Parameters.AddWithValue("$target", item.TargetId.ToString());
         cmd.Parameters.AddWithValue("$origin", item.OriginId.ToString());
@@ -354,14 +359,14 @@ public sealed class HistoryStore : IDisposable
     public List<RelayItem> PendingRelays(Guid? targetId = null)
     {
         using var cmd = Command(targetId == null
-            ? "SELECT id, target, origin, packet FROM relay WHERE delivered = 0 ORDER BY rowid"
-            : "SELECT id, target, origin, packet FROM relay WHERE delivered = 0 AND target = $target ORDER BY rowid");
+            ? "SELECT id, target, origin, packet, payload FROM relay WHERE delivered = 0 ORDER BY rowid"
+            : "SELECT id, target, origin, packet, payload FROM relay WHERE delivered = 0 AND target = $target ORDER BY rowid");
         if (targetId != null) cmd.Parameters.AddWithValue("$target", targetId.Value.ToString());
         using var reader = cmd.ExecuteReader();
         var result = new List<RelayItem>();
         while (reader.Read())
             result.Add(new RelayItem(Guid.Parse(reader.GetString(0)), Guid.Parse(reader.GetString(1)),
-                Guid.Parse(reader.GetString(2)), reader.GetString(3)));
+                Guid.Parse(reader.GetString(2)), reader.GetString(3), reader.GetString(4) is { Length: > 0 } p ? p : null));
         return result;
     }
 
@@ -379,6 +384,39 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$id", packetId.ToString());
         cmd.Parameters.AddWithValue("$at", DateTime.UtcNow.Ticks);
         return cmd.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>Пакет уже обрабатывали (или это удалённое до прихода сообщение).</summary>
+    public bool WasSeen(Guid packetId)
+    {
+        using var cmd = Command("SELECT 1 FROM seen_packets WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", packetId.ToString());
+        return cmd.ExecuteScalar() != null;
+    }
+
+    public void MarkHandedToRelays(Guid messageId)
+    {
+        using var cmd = Command("INSERT OR IGNORE INTO relayed_messages (id) VALUES ($id)");
+        cmd.Parameters.AddWithValue("$id", messageId.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    public bool WasHandedToRelays(Guid messageId)
+    {
+        using var cmd = Command("SELECT 1 FROM relayed_messages WHERE id = $id");
+        cmd.Parameters.AddWithValue("$id", messageId.ToString());
+        return cmd.ExecuteScalar() != null;
+    }
+
+    /// <summary>Участники группы, которым своё сообщение ещё не доставлено.</summary>
+    public List<Guid> PendingRecipients(Guid messageId)
+    {
+        using var cmd = Command("SELECT peer_id FROM group_receipts WHERE message_id = $msg AND state = 0");
+        cmd.Parameters.AddWithValue("$msg", messageId.ToString());
+        using var reader = cmd.ExecuteReader();
+        var result = new List<Guid>();
+        while (reader.Read()) result.Add(Guid.Parse(reader.GetString(0)));
+        return result;
     }
 
     /// <summary>
@@ -646,11 +684,14 @@ public sealed class HistoryStore : IDisposable
         return cmd;
     }
 
-    private void AddColumnIfMissing(string column, string definition)
+    private void AddColumnIfMissing(string column, string definition) =>
+        AddColumnIfMissing("messages", column, definition);
+
+    private void AddColumnIfMissing(string table, string column, string definition)
     {
-        using var info = Command($"SELECT 1 FROM pragma_table_info('messages') WHERE name = '{column}'");
+        using var info = Command($"SELECT 1 FROM pragma_table_info('{table}') WHERE name = '{column}'");
         if (info.ExecuteScalar() == null)
-            Execute($"ALTER TABLE messages ADD COLUMN {column} {definition}");
+            Execute($"ALTER TABLE {table} ADD COLUMN {column} {definition}");
     }
 
     private void Execute(string sql)

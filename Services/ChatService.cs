@@ -107,6 +107,7 @@ public sealed partial class ChatService : IDisposable
 
         _outbox = _store.LoadOutbox();
         _store.PruneRelays(RelayLifetime);
+        CleanRelayFolder();
         LoadHistory();
     }
 
@@ -227,7 +228,11 @@ public sealed partial class ChatService : IDisposable
 
             foreach (var message in messages)
             {
-                if (message.CanCancel) message.PeerOffline = true;
+                if (message.CanCancel)
+                {
+                    message.PeerOffline = true;
+                    message.IsRelayed = _store.WasHandedToRelays(message.Id);
+                }
                 contact.Messages.Add(message);
             }
             contact.HasOlderMessages = recent.Count == PageSize;
@@ -248,6 +253,7 @@ public sealed partial class ChatService : IDisposable
         foreach (var message in messages)
         {
             if (contact.IsGroup) RefreshReceipts(message);
+            if (message.CanCancel) message.IsRelayed = _store.WasHandedToRelays(message.Id);
             contact.Messages.Add(message);
         }
         contact.HasOlderMessages = recent.Count == PageSize;
@@ -387,6 +393,7 @@ public sealed partial class ChatService : IDisposable
         _store.SaveContact(contact.Peer!);
         Save(contact, message);
         _ = FlushAsync(contact);
+        OfferRelays();
     }
 
     // ---- Отправка ----
@@ -519,7 +526,9 @@ public sealed partial class ChatService : IDisposable
         var contact = Conversations.FirstOrDefault(c => c.Messages.Contains(message));
         if (contact == null) return false;
 
+        var pending = PendingTargetsOf(contact, message);
         RemoveMessage(contact, message);
+        RecallRelayed(contact, message, pending);
         return true;
     }
 
@@ -579,7 +588,9 @@ public sealed partial class ChatService : IDisposable
             : contact.IsGroup ? _store.DeliveredTo(message.Id)
             : message.Status != MessageStatus.Queued ? new List<Guid> { contact.Peer!.Id }
             : new List<Guid>();
+        var pending = PendingTargetsOf(contact, message);
         RemoveMessage(contact, message);
+        RecallRelayed(contact, message, pending);
         if (forEveryone && message.CanDeleteForEveryone)
         {
             foreach (var peerId in reachedPeers)
@@ -627,7 +638,12 @@ public sealed partial class ChatService : IDisposable
     private void ApplyDelete(Contact contact, ChatPacket packet)
     {
         var message = FindIncoming(contact, packet.TargetId, packet.From);
-        if (message == null) return;
+        if (message == null)
+        {
+            // Удаление обогнало само сообщение (оно идёт через коллег) — когда дойдёт, не показываем.
+            if (!_store.HasMessage(packet.TargetId)) _store.MarkSeen(packet.TargetId);
+            return;
+        }
         if (contact.Messages.Contains(message))
         {
             RemoveMessage(contact, message);
@@ -661,7 +677,7 @@ public sealed partial class ChatService : IDisposable
     {
         var item = _store.AddOutbox(peerId, JsonSerializer.Serialize(packet));
         _outbox.Add(item);
-        OfferRelay(item);
+        OfferRelays();
         _ = FlushAsync(peerId);
     }
 
@@ -745,18 +761,21 @@ public sealed partial class ChatService : IDisposable
         if (!hasWork || peer.Address.Equals(IPAddress.None) || !_flushing.Add(peer.Id)) return;
         // Даже если обнаружение считает собеседника ушедшим, пробуем напрямую по последнему адресу:
         // UDP-рассылку может резать брандмауэр, а TCP при этом работать.
+        var done = false;
         try
         {
             if (contact != null && !await FlushMessagesAsync(contact, peer)) return;
             // Служебные пакеты (в том числе «вас добавили в группу») — раньше сообщений групп.
             if (!await FlushOutboxAsync(peer)) return;
-            await FlushGroupMessagesAsync(peer);
+            if (!await FlushGroupMessagesAsync(peer)) return;
             // Хранимое за других — тоже ему.
-            await FlushRelaysAsync(peer);
+            done = await FlushRelaysAsync(peer);
         }
         finally
         {
             _flushing.Remove(peer.Id);
+            // Не достучались до того, кого нет в сети, — пусть передадут коллеги.
+            if (!done && !peer.IsOnline) OfferRelays();
         }
     }
 
@@ -911,8 +930,17 @@ public sealed partial class ChatService : IDisposable
 
         // Вложение пришло к пакету, которому оно не положено (чужая версия) — не оставляем мусор.
         if (packet.ReceivedPayloadPath != null &&
-            packet.Type is not (ChatPacket.Image or ChatPacket.File or ChatPacket.UpdatePackage))
+            packet.Type is not (ChatPacket.Image or ChatPacket.File or ChatPacket.UpdatePackage or ChatPacket.Relay))
+        {
             FileStore.DeleteQuietly(packet.ReceivedPayloadPath);
+            packet.ReceivedPayloadPath = null;
+        }
+        HandlePacket(contact, packet);
+    }
+
+    /// <summary>Пакет от <paramref name="contact"/> — пришедший напрямую или переданный за него коллегой.</summary>
+    private void HandlePacket(Contact contact, ChatPacket packet)
+    {
 
         // Пакет относится к группе — дальше работаем с перепиской группы, а не с личной.
         Contact conversation = contact;
@@ -958,6 +986,9 @@ public sealed partial class ChatService : IDisposable
             case ChatPacket.GroupUpdate when packet.IsGroup:
                 OnGroupUpdate(contact, packet);
                 break;
+            case ChatPacket.Delivered when packet.MessageIds != null:
+                OnDeliveredNotice(contact, conversation, packet.MessageIds);
+                break;
             case ChatPacket.ReadReceipt when packet.MessageIds != null && conversation.IsGroup:
                 OnGroupReadReceipt(conversation, contact.Peer!.Id, packet.MessageIds);
                 break;
@@ -978,8 +1009,9 @@ public sealed partial class ChatService : IDisposable
     {
         var received = packet.ReceivedPayloadPath;
 
-        // Повтор, если до отправителя не дошло наше подтверждение.
-        if (_store.HasMessage(packet.Id))
+        // Повтор, если до отправителя не дошло наше подтверждение (или пришла ещё одна копия через коллег);
+        // либо автор удалил сообщение раньше, чем оно до нас дошло.
+        if (_store.HasMessage(packet.Id) || _store.WasSeen(packet.Id))
         {
             if (received != null) FileStore.DeleteQuietly(received);
             return;
@@ -1092,6 +1124,8 @@ public sealed partial class ChatService : IDisposable
         RemoveIfForgotten(contact);
         UpdateGroupStatuses();
         PresenceChanged?.Invoke();
+        // Ушёл, не дождавшись своего, — пусть передадут коллеги.
+        OfferRelays();
     }
 
     private Contact GetOrAddContact(Peer peer)

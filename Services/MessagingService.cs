@@ -343,6 +343,12 @@ public sealed class ChatPacket
     /// </summary>
     public const string Relay = "relay";
 
+    /// <summary>
+    /// «Доставлено» для сообщений из <see cref="MessageIds"/>, полученных через коллег: автор узнаёт об этом,
+    /// даже не встретившись с получателем (уведомление тоже может прийти через коллег).
+    /// </summary>
+    public const string Delivered = "delivered";
+
     // Мини-игры: все пакеты относятся к партии <see cref="GameId"/>; вид игры — в приглашении (<see cref="GameKind"/>).
     public const string GameInvite = "game-invite";
     public const string GameAccept = "game-accept";
