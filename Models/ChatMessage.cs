@@ -251,6 +251,18 @@ public sealed class ChatMessage : INotifyPropertyChanged
         }
     }
 
+    /// <summary>Копии отданы коллегам: они передадут сообщение, когда адресат появится (даже если мы выключимся).</summary>
+    public bool IsRelayed
+    {
+        get => _isRelayed;
+        set
+        {
+            if (Set(ref _isRelayed, value))
+                OnPropertyChanged(nameof(StatusText));
+        }
+    }
+    private bool _isRelayed;
+
     /// <summary>Почему не уходит, если адресат в сети, но доставка не удалась (пусто — причина неизвестна).</summary>
     public string FailureHint
     {
@@ -269,7 +281,9 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public string StatusText => !IsOutgoing ? "" : IsGroupOutgoing ? GroupStatusText : Status switch
     {
         MessageStatus.Queued => PeerOffline
-            ? "⏳ Адресат не в сети — отправится, когда он появится"
+            ? IsRelayed
+                ? "⏳ Адресат не в сети — передано коллегам, доставят, когда он появится"
+                : "⏳ Адресат не в сети — отправится, когда он появится"
             : FailureHint.Length > 0
                 ? $"⏳ {FailureHint} — повторяем…"
                 : "⏳ Не удалось отправить — повторяем…",
@@ -290,6 +304,7 @@ public sealed class ChatMessage : INotifyPropertyChanged
         _ when ReadCount > 0 => $"✓✓ Прочитали {ReadCount} из {RecipientCount}",
         _ when DeliveredCount >= RecipientCount => "✓ Доставлено",
         _ when DeliveredCount > 0 => $"✓ Доставлено {DeliveredCount} из {RecipientCount}",
+        _ when IsRelayed => "⏳ Участники не в сети — передано коллегам, доставят, когда появятся",
         _ => "⏳ Участники не в сети — отправится, когда появятся",
     };
 

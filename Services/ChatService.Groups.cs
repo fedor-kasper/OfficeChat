@@ -141,6 +141,7 @@ public sealed partial class ChatService
         RefreshReceipts(message);
         foreach (var peerId in recipients)
             _ = FlushAsync(peerId);
+        OfferRelays();
     }
 
     /// <summary>
@@ -156,16 +157,13 @@ public sealed partial class ChatService
             var message = contact.Messages.FirstOrDefault(m => m.Id == messageId) ?? _store.LoadMessage(messageId)?.Message;
             if (message == null) continue;
 
-            var packet = BuildMessagePacket(message);
+            var packet = BuildGroupPacket(contact, message);
             if (packet == null)
             {
                 if (contact.Messages.Contains(message)) RemoveMessage(contact, message);
                 else _store.DeleteMessage(message.Id);
                 continue;
             }
-            packet.GroupId = group.Id;
-            packet.GroupName = group.Name;
-            packet.GroupMembers = group.Members.ToList();
 
             message.Status = MessageStatus.Sending;
             message.TransferProgress = 0;
@@ -191,6 +189,18 @@ public sealed partial class ChatService
             }
         }
         return true;
+    }
+
+    /// <summary>Пакет своего сообщения в группе (с составом группы — вдруг участник её ещё не знает).</summary>
+    private ChatPacket? BuildGroupPacket(Contact contact, ChatMessage message)
+    {
+        var packet = BuildMessagePacket(message);
+        if (packet == null) return null;
+        var group = contact.Group!;
+        packet.GroupId = group.Id;
+        packet.GroupName = group.Name;
+        packet.GroupMembers = group.Members.ToList();
+        return packet;
     }
 
     /// <summary>Обновляет у своего сообщения в группе, скольким оно доставлено и кто прочитал.</summary>
