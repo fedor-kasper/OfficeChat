@@ -63,4 +63,38 @@ public sealed class Hub(ServerDb db, ILogger<Hub> log)
         foreach (var connection in _connections.Values.Where(c => c.AccountId == accountId && (deviceId == null || c.DeviceId == deviceId)))
             connection.Close();
     }
+
+    /// <summary>
+    /// Отключить устройства, отозванные в обход веб-API (команды сервера в консоли работают в другом процессе).
+    /// </summary>
+    public void DisconnectRevoked()
+    {
+        if (_connections.IsEmpty) return;
+        var active = db.ActiveDevices();
+        foreach (var connection in _connections.Values.Where(c => !active.Contains(c.DeviceId)))
+        {
+            log.LogInformation("Устройство «{Device}» ({Account}) отозвано — отключаем", connection.DeviceName, connection.AccountLogin);
+            connection.Close();
+        }
+    }
+}
+
+/// <summary>Раз в полминуты сверяет подключённые устройства с базой.</summary>
+public sealed class RevocationWatcher(Hub hub, ILogger<RevocationWatcher> log) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            try
+            {
+                hub.DisconnectRevoked();
+            }
+            catch (Exception ex)
+            {
+                log.LogWarning(ex, "Не удалось проверить отозванные устройства");
+            }
+        }
+    }
 }

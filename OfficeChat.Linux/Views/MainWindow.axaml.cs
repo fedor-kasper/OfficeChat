@@ -317,9 +317,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            ChatStatusText.Text = _current.IsOnline
-                ? $"в сети · {_current.Peer!.Machine} · {_current.Peer.Address}"
-                : "не в сети — сообщения будут доставлены, когда компьютер появится";
+            ChatStatusText.Text = _current.StatusLine;
         }
     }
 

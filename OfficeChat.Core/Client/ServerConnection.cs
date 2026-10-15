@@ -26,7 +26,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Frame>> _pending = new();
-    private readonly Channel<Frame> _incoming = Channel.CreateUnbounded<Frame>(new UnboundedChannelOptions { SingleReader = true });
+    private readonly Channel<Frame> _incoming = Channel.CreateUnbounded<Frame>();
     private ClientWebSocket? _socket;
     private Task? _loop;
     private int _rid;

@@ -35,6 +35,7 @@ public partial class LoginWindow : Window
         if (previous != null)
         {
             LoginBox.Text = previous.Login;
+            TabsGrid.IsVisible = false;
             SubtitleText.Text = "Вход больше не действует — войдите снова";
         }
         Opened += async (_, _) =>

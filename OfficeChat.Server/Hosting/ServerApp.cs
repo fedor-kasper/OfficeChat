@@ -47,6 +47,7 @@ public static class ServerApp
         builder.Services.AddSingleton(identity);
         builder.Services.AddSingleton(new ServerDb(options.DatabasePath));
         builder.Services.AddSingleton<Hub>();
+        builder.Services.AddHostedService<RevocationWatcher>();
         builder.Services.AddSingleton<ChatLogic>();
         builder.Services.AddSingleton<LoginThrottle>();
         builder.Services.AddHostedService<DiscoveryResponder>();

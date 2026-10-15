@@ -74,6 +74,7 @@ public sealed partial class ChatService
     private async void OnServerConnected()
     {
         Log.Info("Связь с сервером есть, журнал догнан");
+        ShowDeferredPopups();
         try
         {
             var accounts = await _session!.Api.AccountsAsync();
@@ -113,6 +114,7 @@ public sealed partial class ChatService
         _serverAccounts.Add(entry.Id);
         var peer = _discovery.Find(entry.Id) ?? _discovery.AddKnown(entry.Id, entry.DisplayName, "", IPAddress.None);
         if (entry.DisplayName.Length > 0) peer.Name = entry.DisplayName;
+        peer.HasAccount = true;
         peer.ServerOnline = entry.Online;
         var contact = GetOrAddContact(peer);
         if (contact.Messages.Count > 0) _store.SaveContact(peer);
@@ -333,7 +335,14 @@ public sealed partial class ChatService
             return;
         }
 
-        if (_store.HasMessage(dto.Id) || _store.WasSeen(dto.Id)) return; // уже пришло напрямую
+        if (_store.HasMessage(dto.Id) || _store.WasSeen(dto.Id))
+        {
+            // Уже пришло напрямую, пока сервера не было. Если успели прочитать — отметка «прочитано» могла
+            // дойти до сервера раньше самого сообщения (и потеряться): повторяем её.
+            if (dto.GroupId == null && _store.LoadMessage(dto.Id) is { Message.IsRead: true })
+                EnqueueServer(Ops.Read, new MessageIdsData([dto.Id]));
+            return;
+        }
         var packet = new ChatPacket
         {
             Type = dto.Kind switch { MessageKinds.Image => ChatPacket.Image, MessageKinds.File => ChatPacket.File, _ => ChatPacket.Message },
@@ -360,13 +369,14 @@ public sealed partial class ChatService
         // Старое (догоняем историю) не всплывает уведомлениями.
         var fresh = DateTimeOffset.UtcNow - dto.ServerTime < FreshMessageAge;
         _quietReceive = !fresh;
+        _catchUpReceive = _connection is { IsConnected: false };
         try
         {
             ReceiveMessage(conversation, packet);
         }
         finally
         {
-            _quietReceive = false;
+            _quietReceive = _catchUpReceive = false;
         }
         if (_store.LoadMessage(dto.Id) is { Message: var saved } && saved.ServerFileId != dto.FileId)
         {
@@ -377,6 +387,29 @@ public sealed partial class ChatService
 
     // При догонке старой истории — без уведомлений и без отметки «непрочитано» у давно прочитанного.
     private bool _quietReceive;
+
+    // Пока журнал догоняется, уведомления откладываются: дальше в журнале может оказаться,
+    // что сообщение уже прочитано на другом устройстве.
+    private readonly List<(Contact Contact, ChatMessage Message)> _deferredPopups = new();
+    private bool _catchUpReceive;
+
+    private void NotifyReceived(Contact contact, ChatMessage message)
+    {
+        if (_catchUpReceive)
+            _deferredPopups.Add((contact, message));
+        else
+            MessageReceived?.Invoke(contact, message);
+    }
+
+    /// <summary>Журнал догнан — показать отложенные уведомления о том, что так и осталось непрочитанным.</summary>
+    private void ShowDeferredPopups()
+    {
+        var pending = _deferredPopups.ToList();
+        _deferredPopups.Clear();
+        foreach (var (contact, message) in pending)
+            if (!message.IsRead && contact.Messages.Contains(message))
+                MessageReceived?.Invoke(contact, message);
+    }
 
     /// <summary>Своё сообщение: подтверждение отправки или отправленное с другого устройства.</summary>
     private async Task OnOwnMessageFromServerAsync(Contact conversation, MessageDto dto)

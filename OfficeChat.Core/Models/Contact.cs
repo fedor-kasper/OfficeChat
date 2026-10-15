@@ -40,8 +40,18 @@ public sealed class Contact : INotifyPropertyChanged
     /// <summary>Позвать играть можно только человека в сети.</summary>
     public bool CanInviteToGame => Peer is { IsOnline: true };
 
-    /// <summary>Вручную убрать из списка можно только того, кто не в сети (из группы — выйти).</summary>
-    public bool CanRemove => Peer is { IsOnline: false };
+    /// <summary>
+    /// Вручную убрать из списка можно только того, кто не в сети (из группы — выйти).
+    /// Сотрудники с аккаунтом на сервере всегда в списке.
+    /// </summary>
+    public bool CanRemove => Peer is { IsOnline: false, HasAccount: false };
+
+    /// <summary>Строка состояния под именем в открытой переписке.</summary>
+    public string StatusLine => Peer == null ? ""
+        : Peer.LanOnline && Peer.Machine.Length > 0 ? $"в сети · {Peer.Machine} · {Peer.Address}"
+        : Peer.IsOnline ? "в сети"
+        : Peer.HasAccount ? "не в сети — сообщения получит, когда включит OfficeChat"
+        : "не в сети — сообщения будут доставлены, когда компьютер появится";
 
     public string Subtitle => IsTyping ? TypingText
         : Group != null ? Group.StatusText

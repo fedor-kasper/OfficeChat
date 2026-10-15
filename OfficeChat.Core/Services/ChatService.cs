@@ -1114,7 +1114,7 @@ public sealed partial class ChatService : IDisposable
             UnreadChanged?.Invoke();
         }
 
-        if (!_quietReceive) MessageReceived?.Invoke(contact, message);
+        if (!_quietReceive) NotifyReceived(contact, message);
     }
 
     private bool IsMyMessage(Contact contact, Guid id) =>

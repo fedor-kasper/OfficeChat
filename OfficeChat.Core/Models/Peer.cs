@@ -76,6 +76,9 @@ public sealed class Peer : INotifyPropertyChanged
 
     public DateTime LastSeen { get; set; }
 
+    /// <summary>У собеседника аккаунт на сервере: он всегда в списке, сообщения ждут его на сервере.</summary>
+    public bool HasAccount { get; set; }
+
     /// <summary>Версия OfficeChat у собеседника (пусто — старая версия, которая её не сообщает).</summary>
     public string AppVersion { get; set; } = "";
 

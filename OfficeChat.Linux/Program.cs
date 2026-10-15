@@ -54,7 +54,7 @@ internal static class Program
         }
         finally
         {
-            Instance.Dispose();
+            Instance?.Dispose();
         }
     }
 

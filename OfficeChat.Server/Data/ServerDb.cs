@@ -269,6 +269,11 @@ public sealed class ServerDb
     public void RevokeAllDevices(Guid accountId) =>
         NonQuery("UPDATE devices SET revoked = 1 WHERE account_id = $a", ("$a", Id(accountId)));
 
+    /// <summary>Устройства, которыми ещё можно пользоваться (не отозваны, аккаунт не заблокирован).</summary>
+    public HashSet<Guid> ActiveDevices() =>
+        Query("SELECT d.id FROM devices d JOIN accounts a ON a.id = d.account_id WHERE d.revoked = 0 AND a.is_blocked = 0",
+            r => Guid.Parse(r.GetString(0))).ToHashSet();
+
     public void TouchDevice(Guid deviceId) =>
         NonQuery("UPDATE devices SET last_seen = $now WHERE id = $id", ("$now", Now()), ("$id", Id(deviceId)));
 
