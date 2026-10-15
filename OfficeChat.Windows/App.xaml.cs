@@ -107,6 +107,7 @@ public partial class App : Application
                 account = again.Account;
                 session = AccountLauncher.CreateSession(account)!;
             }
+            OfferMigration(account, session);
             settings = AccountLauncher.Activate(account);
         }
         else
@@ -146,6 +147,29 @@ public partial class App : Application
             foreach (var other in AccountStore.All().Where(a => a.Id != account.Id))
                 AccountLauncher.StartCopy(AccountLauncher.AccountArgument, other.Id.ToString(), AutoStartService.TrayArgument);
         Log.Info("Запуск завершён");
+    }
+
+    /// <summary>Первый вход на этом компьютере: перенести переписку, которая велась без аккаунта.</summary>
+    private static void OfferMigration(SavedAccount account, ServerSession session)
+    {
+        if (LegacyMigration.Offer(account) is not { } legacy) return;
+        if (MessageBox.Show(LegacyMigration.Question(account, legacy), "OfficeChat — перенос переписки",
+                MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            LegacyMigration.Decline(account);
+            return;
+        }
+        try
+        {
+            // Запуск ещё не закончен (окон нет) — ждём переноса здесь же.
+            Task.Run(() => LegacyMigration.MigrateAsync(account, session, legacy)).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Не удалось перенести переписку без аккаунта", ex);
+            MessageBox.Show("Не удалось перенести переписку: " + LoginFlow.Describe(ex) +
+                            "\n\nПопробуем снова при следующем запуске.", "OfficeChat");
+        }
     }
 
     /// <summary>

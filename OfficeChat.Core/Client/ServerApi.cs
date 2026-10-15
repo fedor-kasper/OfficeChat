@@ -113,6 +113,18 @@ public sealed class ServerApi : IDisposable
     public Task RevokeDeviceAsync(Guid id, CancellationToken ct = default) =>
         SendAsync(HttpMethod.Delete, $"api/devices/{id}", null, ct);
 
+    // ---- Перенос старой переписки ----
+
+    /// <summary>Какие старые Id (до аккаунтов) чьи.</summary>
+    public Task<List<LegacyMapping>> LegacyMappingsAsync(CancellationToken ct = default) =>
+        GetAsync<List<LegacyMapping>>("api/legacy", ct);
+
+    public Task<LegacyClaimResponse> ClaimLegacyAsync(List<Guid> legacyIds, CancellationToken ct = default) =>
+        PostAsync<LegacyClaimResponse>("api/legacy/claim", new LegacyClaimRequest(legacyIds), ct);
+
+    public Task<ImportResponse> ImportAsync(ImportRequest request, CancellationToken ct = default) =>
+        PostAsync<ImportResponse>("api/import", request, ct);
+
     /// <summary>Загрузить файл на сервер (потоком с диска) — для вложения в сообщение.</summary>
     public async Task<FileUploadResponse> UploadAsync(string path, string name, IProgress<double>? progress = null,
         CancellationToken ct = default)

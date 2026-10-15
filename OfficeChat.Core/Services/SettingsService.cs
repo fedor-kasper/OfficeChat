@@ -25,6 +25,12 @@ public sealed class AppSettings
 
     /// <summary>Недавно отправленные стикеры (по Id, последние — первыми).</summary>
     public List<string> RecentStickers { get; set; } = new();
+
+    /// <summary>Переписка без аккаунта перенесена в этот аккаунт (в настройках общей папки).</summary>
+    public Guid? MigratedTo { get; set; }
+
+    /// <summary>Перенести переписку без аккаунта уже предлагали (в настройках аккаунта) — больше не спрашиваем.</summary>
+    public bool LegacyOffered { get; set; }
 }
 
 /// <summary>
@@ -51,31 +57,39 @@ public static class SettingsService
         DataFolder = folder;
     }
 
-    private static string SettingsPath => Path.Combine(DataFolder, "settings.json");
+    private static string SettingsPath => PathIn(DataFolder);
+
+    private static string PathIn(string folder) => Path.Combine(folder, "settings.json");
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    public static AppSettings Load()
+    public static AppSettings Load() => LoadFrom(DataFolder);
+
+    /// <summary>Настройки из другой папки (например, общей — при переносе переписки в аккаунт).</summary>
+    public static AppSettings LoadFrom(string folder)
     {
+        var path = PathIn(folder);
         try
         {
-            if (File.Exists(SettingsPath))
+            if (File.Exists(path))
             {
-                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(SettingsPath));
+                var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path));
                 if (settings != null) return settings;
             }
         }
         catch (Exception ex)
         {
             // Повреждённый файл — начинаем с чистых настроек.
-            Log.Warn($"Не удалось прочитать {SettingsPath} — начинаем с чистых настроек", ex);
+            Log.Warn($"Не удалось прочитать {path} — начинаем с чистых настроек", ex);
         }
         return new AppSettings();
     }
 
-    public static void Save(AppSettings settings)
+    public static void Save(AppSettings settings) => SaveTo(DataFolder, settings);
+
+    public static void SaveTo(string folder, AppSettings settings)
     {
-        Directory.CreateDirectory(DataFolder);
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(settings, JsonOptions));
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(PathIn(folder), JsonSerializer.Serialize(settings, JsonOptions));
     }
 }

@@ -61,6 +61,7 @@ public sealed partial class ChatService
         _connection.PresenceChanged += OnServerPresence;
         _connection.SignalReceived += OnServerSignal;
         _connection.DirectoryChanged += entry => AddServerAccount(entry);
+        _connection.LegacyMapped += ApplyLegacyMappings;
         _connection.AuthFailed += reason => SessionExpired?.Invoke(reason);
         _connection.Start();
     }
@@ -94,6 +95,8 @@ public sealed partial class ChatService
         PresenceChanged?.Invoke();
         ServerStateChanged?.Invoke();
         _ = PumpServerOutboxAsync();
+        await FetchLegacyMappingsAsync();
+        _ = ImportLegacyHistoryAsync();
     }
 
     private void OnServerDisconnected()
@@ -321,8 +324,8 @@ public sealed partial class ChatService
         var conversation = dto.GroupId is { } groupId
             ? _groups.GetValueOrDefault(groupId)
             : dto.SenderId == MyId
-                ? ContactOfAccount(dto.RecipientId!.Value, "")
-                : ContactOfAccount(dto.SenderId, dto.SenderName);
+                ? Counterpart(dto.RecipientId!.Value, dto.RecipientName, dto.Imported)
+                : Counterpart(dto.SenderId, dto.SenderName, dto.Imported);
         if (conversation == null)
         {
             Log.Warn($"Сообщение {dto.Id} в неизвестной группе {dto.GroupId} — пропускаем");
@@ -339,8 +342,13 @@ public sealed partial class ChatService
         {
             // Уже пришло напрямую, пока сервера не было. Если успели прочитать — отметка «прочитано» могла
             // дойти до сервера раньше самого сообщения (и потеряться): повторяем её.
-            if (dto.GroupId == null && _store.LoadMessage(dto.Id) is { Message.IsRead: true })
+            if (!dto.Imported && dto.GroupId == null && _store.LoadMessage(dto.Id) is { Message.IsRead: true })
                 EnqueueServer(Ops.Read, new MessageIdsData([dto.Id]));
+            return;
+        }
+        if (dto.Imported)
+        {
+            await OnImportedMessageAsync(conversation, dto);
             return;
         }
         var packet = new ChatPacket
@@ -425,32 +433,8 @@ public sealed partial class ChatService
             return;
         }
 
-        var kind = dto.Kind switch { MessageKinds.Image => MessageKind.Image, MessageKinds.File => MessageKind.File, _ => MessageKind.Text };
-        var filePath = "";
-        if (dto.FileId is { } fileId)
-        {
-            var downloaded = await DownloadAttachmentAsync(fileId, dto.FileName);
-            if (downloaded == null) return;
-            try
-            {
-                if (kind == MessageKind.Image)
-                {
-                    Directory.CreateDirectory(ImageStore.Folder);
-                    File.Move(downloaded, ImageStore.PathFor(dto.Id, dto.FileName), overwrite: true);
-                }
-                else
-                {
-                    filePath = FileStore.NewPath(dto.Id, dto.FileName);
-                    File.Move(downloaded, filePath, overwrite: true);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                Log.Error($"Не удалось сохранить вложение «{dto.FileName}»", ex);
-                FileStore.DeleteQuietly(downloaded);
-                return;
-            }
-        }
+        var kind = KindOf(dto);
+        if (await StoreAttachmentAsync(dto, kind) is not { } filePath) return;
 
         var message = new ChatMessage
         {
@@ -469,20 +453,56 @@ public sealed partial class ChatService
             ReplyToId = dto.ReplyToId,
             ReplyAuthor = dto.ReplyAuthor == _settings.DisplayName ? MyReplyAuthor : dto.ReplyAuthor,
             ReplyText = dto.ReplyText,
-            Status = MessageStatus.Sent,
+            Status = dto.Imported ? ImportedStatus(dto.ImportedState) : MessageStatus.Sent,
             ServerFileId = dto.FileId,
         };
         InsertByTime(conversation, message);
         if (conversation.IsGroup)
         {
-            _store.AddReceipts(message.Id, conversation.Group!.Members.Where(m => m.Id != MyId).Select(m => m.Id).ToList());
-            RefreshReceipts(message);
+            // У перенесённого из старой переписки отметок по участникам нет — статус как был.
+            if (!dto.Imported)
+            {
+                _store.AddReceipts(message.Id, conversation.Group!.Members.Where(m => m.Id != MyId).Select(m => m.Id).ToList());
+                RefreshReceipts(message);
+            }
         }
         else
         {
             _store.SaveContact(conversation.Peer!);
         }
         Save(conversation, message);
+    }
+
+    private static MessageKind KindOf(MessageDto dto) =>
+        dto.Kind switch { MessageKinds.Image => MessageKind.Image, MessageKinds.File => MessageKind.File, _ => MessageKind.Text };
+
+    /// <summary>
+    /// Скачать вложение сообщения на место: изображение — в папку изображений, файл — в папку файлов.
+    /// Возвращает путь файла ("" — изображение или вложения нет); null — не получилось, сообщение пропускаем.
+    /// </summary>
+    private async Task<string?> StoreAttachmentAsync(MessageDto dto, MessageKind kind)
+    {
+        if (dto.FileId is not { } fileId) return "";
+        var downloaded = await DownloadAttachmentAsync(fileId, dto.FileName);
+        if (downloaded == null) return null;
+        try
+        {
+            if (kind == MessageKind.Image)
+            {
+                Directory.CreateDirectory(ImageStore.Folder);
+                File.Move(downloaded, ImageStore.PathFor(dto.Id, dto.FileName), overwrite: true);
+                return "";
+            }
+            var filePath = FileStore.NewPath(dto.Id, dto.FileName);
+            File.Move(downloaded, filePath, overwrite: true);
+            return filePath;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error($"Не удалось сохранить вложение «{dto.FileName}»", ex);
+            FileStore.DeleteQuietly(downloaded);
+            return null;
+        }
     }
 
     /// <summary>Сообщение в переписку по времени (история может прийти не по порядку).</summary>
@@ -675,6 +695,8 @@ public sealed partial class ChatService
             _store.ForgetLeftGroup(group.Id);
             _store.SaveGroup(group);
             contact = AddGroupContact(group);
+            // Перенесённая из старой переписки — без записи «создал группу».
+            if (dto.Action == GroupActions.Imported) return;
             var others = members.Where(m => m.Id != MyId).ToList();
             AddServiceRecord(contact, dto.ActorId == MyId
                 ? $"Вы создали группу «{group.Name}»: {Names(others)}"
@@ -707,6 +729,9 @@ public sealed partial class ChatService
                 foreach (var member in left) AddServiceRecord(contact, $"{member.Name} вышел(-ла) из группы");
                 break;
         }
+        // Перенесённая группа: на сервере пока только участники с аккаунтами — кто ещё без аккаунта, остаётся у нас.
+        if (dto.Action == GroupActions.Imported)
+            members.AddRange(local.Members.Where(m => !_serverAccounts.Contains(m.Id) && members.All(x => x.Id != m.Id)));
         local.Name = CleanGroupName(dto.Name);
         local.Members = members;
         _store.SaveGroup(local);

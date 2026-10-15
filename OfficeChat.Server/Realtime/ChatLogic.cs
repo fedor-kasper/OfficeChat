@@ -315,8 +315,9 @@ public sealed partial class ChatLogic(ServerDb db, Hub hub, ILogger<ChatLogic> l
     {
         if (data.Id == Guid.Empty) throw Bad("У напоминания нет Id");
         if (data.Json.Length > MaxReminderJson) throw Bad("Слишком большое напоминание");
-        var participants = data.ParticipantIds.Where(id => id != client.AccountId).Distinct().ToList();
-        if (participants.Any(id => !db.AccountExists(id))) throw NotFound("Кого-то из участников нет на сервере");
+        // Участники — аккаунты; кто ещё без аккаунта (по старому Id) — по аккаунту, если перешёл, иначе получит напрямую.
+        var participants = data.ParticipantIds.Select(id => db.ResolveAccount(id)).OfType<Guid>()
+            .Where(id => id != client.AccountId).Distinct().ToList();
 
         var existing = db.FindReminder(data.Id);
         if (existing != null && existing.CreatorId != client.AccountId) throw Forbidden("Менять напоминание может только автор");

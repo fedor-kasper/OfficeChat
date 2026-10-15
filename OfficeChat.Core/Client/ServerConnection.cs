@@ -45,6 +45,9 @@ public sealed class ServerConnection : IAsyncDisposable
     public event Action<Frame>? SignalReceived;
     public event Action<DirectoryEntry>? DirectoryChanged;
 
+    /// <summary>Кто-то перенёс свои старые Id (до аккаунтов) в аккаунт.</summary>
+    public event Action<List<LegacyMapping>>? LegacyMapped;
+
     /// <param name="lastSeq">С какого события догонять журнал (последнее обработанное).</param>
     /// <param name="handleEvent">Обработка события журнала (в UI-потоке, по одному).</param>
     public ServerConnection(ServerApi api, Func<long> lastSeq, Func<Frame, Task> handleEvent)
@@ -233,6 +236,9 @@ public sealed class ServerConnection : IAsyncDisposable
                         break;
                     case Ops.Directory when frame.Account is { } account:
                         DirectoryChanged?.Invoke(account);
+                        break;
+                    case Ops.Legacy when frame.Data is { } data:
+                        LegacyMapped?.Invoke(data.Deserialize<List<LegacyMapping>>(ServerProtocol.Json) ?? new());
                         break;
                 }
             }

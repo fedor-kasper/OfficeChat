@@ -37,6 +37,7 @@ public sealed class ReminderService : IDisposable
         _chat = chat;
         _chat.ReminderPacketReceived += OnPacket;
         _chat.ServerReminderEvent += OnServerEvent;
+        _chat.LegacyHistoryImported += UploadMine;
         foreach (var json in _chat.Store.LoadReminders())
         {
             if (FromJson(json) is { } reminder)
@@ -259,6 +260,14 @@ public sealed class ReminderService : IDisposable
             _chat.SendReliable(participant.Id, new ChatPacket { Type = ChatPacket.ReminderShare, Id = Guid.NewGuid(), Text = json });
         // С аккаунтом — на сервер: и участникам, и на свои другие устройства.
         _chat.ServerRequest(Ops.ReminderPut, new ReminderPutData(reminder.Id, reminder.Participants.Select(p => p.Id).ToList(), json));
+    }
+
+    /// <summary>Перенесли переписку без аккаунта — свои напоминания тоже на сервер (на другие свои устройства).</summary>
+    private void UploadMine()
+    {
+        foreach (var reminder in Reminders.Where(r => r.IsMine))
+            _chat.ServerRequest(Ops.ReminderPut, new ReminderPutData(reminder.Id, reminder.Participants.Select(p => p.Id).ToList(),
+                JsonSerializer.Serialize(ToShared(reminder))));
     }
 
     /// <summary>Сообщить автору и остальным участникам, что мы выполнили (или снова открыли) напоминание.</summary>
@@ -529,5 +538,6 @@ public sealed class ReminderService : IDisposable
         _timer.Stop();
         _chat.ReminderPacketReceived -= OnPacket;
         _chat.ServerReminderEvent -= OnServerEvent;
+        _chat.LegacyHistoryImported -= UploadMine;
     }
 }

@@ -15,11 +15,14 @@ public sealed record StoredContact(Guid Id, string Name, string Machine, IPAddre
 /// </summary>
 public sealed record OutboxItem(long Seq, Guid PeerId, string PacketJson);
 
-/// <summary>Чужой служебный пакет, который мы храним и передадим получателю, когда он появится в сети.</summary>
 /// <summary>Запрос, который нужно отправить серверу (переживает перезапуск и отсутствие связи).</summary>
 public sealed record ServerOutboxItem(long Seq, string Op, string Data);
 
+/// <summary>Чужой служебный пакет, который мы храним и передадим получателю, когда он появится в сети.</summary>
 public sealed record RelayItem(Guid Id, Guid TargetId, Guid OriginId, string PacketJson, string? PayloadPath = null);
+
+/// <summary>Сообщение из истории вместе с перепиской (собеседник или группа) — для переноса на сервер.</summary>
+public sealed record StoredMessage(Guid PeerId, ChatMessage Message);
 
 /// <summary>
 /// История переписки в локальной базе SQLite (%AppData%\OfficeChat\history.db).
@@ -125,6 +128,8 @@ public sealed class HistoryStore : IDisposable
                 data TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            -- Сообщения, перенесённые из переписки без аккаунта и ещё не выгруженные на сервер.
+            CREATE TABLE IF NOT EXISTS import_queue (id TEXT PRIMARY KEY);
             """);
         // Id файла вложения на сервере (загружен — повторно не загружаем).
         AddColumnIfMissing("server_file", "TEXT NOT NULL DEFAULT ''");
@@ -185,7 +190,8 @@ public sealed class HistoryStore : IDisposable
             {
                 Id = Guid.Parse(reader.GetString(0)),
                 Name = reader.GetString(1),
-                Members = JsonSerializer.Deserialize<List<GroupMember>>(reader.GetString(2)) ?? new(),
+                // После переноса старых Id один человек мог оказаться в списке дважды.
+                Members = (JsonSerializer.Deserialize<List<GroupMember>>(reader.GetString(2)) ?? new()).DistinctBy(m => m.Id).ToList(),
             });
         }
         return result;
@@ -678,6 +684,122 @@ public sealed class HistoryStore : IDisposable
         using var cmd = Command("SELECT 1 FROM messages WHERE file_path = $path LIMIT 1");
         cmd.Parameters.AddWithValue("$path", path);
         return cmd.ExecuteScalar() != null;
+    }
+
+    // ---- Перенос старой переписки ----
+
+    /// <summary>Таблицы истории, которые переносятся из старой базы (без аккаунта) в базу аккаунта.</summary>
+    private static readonly string[] HistoryTables =
+        { "contacts", "messages", "groups", "group_receipts", "left_groups", "reminders", "reminder_tombstones" };
+
+    /// <summary>
+    /// Добавить к этой базе историю из другой (старой, без аккаунта). Уже имеющееся не трогается.
+    /// Старую базу нужно перед этим открыть как HistoryStore — чтобы у неё были все колонки.
+    /// </summary>
+    public void CopyHistoryFrom(string otherPath)
+    {
+        using (var attach = Command("ATTACH DATABASE $path AS old"))
+        {
+            attach.Parameters.AddWithValue("$path", otherPath);
+            attach.ExecuteNonQuery();
+        }
+        try
+        {
+            // Колонки — общие для обеих баз (порядок мог разойтись при обновлениях).
+            var columns = HistoryTables.ToDictionary(t => t, t => Columns("main", t).Intersect(Columns("old", t)).ToList());
+            using var transaction = _db.BeginTransaction();
+            void Run(string sql)
+            {
+                using var cmd = Command(sql);
+                cmd.Transaction = transaction;
+                cmd.ExecuteNonQuery();
+            }
+            // Что пришло из старой базы — то и выгрузим на сервер (написанное уже с аккаунтом там и так есть).
+            Run("INSERT OR IGNORE INTO import_queue (id) SELECT id FROM old.messages WHERE id NOT IN (SELECT id FROM main.messages)");
+            foreach (var (table, list) in columns.Where(c => c.Value.Count > 0).Select(c => (c.Key, string.Join(", ", c.Value))))
+                Run($"INSERT OR IGNORE INTO main.{table} ({list}) SELECT {list} FROM old.{table}");
+            transaction.Commit();
+        }
+        finally
+        {
+            Execute("DETACH DATABASE old");
+        }
+    }
+
+    private List<string> Columns(string schema, string table)
+    {
+        using var cmd = Command($"SELECT name FROM pragma_table_info('{table}', '{schema}')");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<string>();
+        while (reader.Read()) result.Add(reader.GetString(0));
+        return result;
+    }
+
+    /// <summary>
+    /// Всё, что было связано с одним Id (собеседника или своим старым), — теперь на другом: человек перешёл
+    /// на аккаунт. true — что-то нашлось и поменялось.
+    /// </summary>
+    public bool RemapPeer(Guid from, Guid to)
+    {
+        var f = from.ToString();
+        var t = to.ToString();
+        var changed = 0;
+        using var transaction = _db.BeginTransaction();
+        void Run(string sql)
+        {
+            using var cmd = Command(sql);
+            cmd.Transaction = transaction;
+            cmd.Parameters.AddWithValue("$f", f);
+            cmd.Parameters.AddWithValue("$t", t);
+            changed += cmd.ExecuteNonQuery();
+        }
+        Run("UPDATE messages SET peer_id = $t WHERE peer_id = $f");
+        Run("UPDATE messages SET sender_id = $t WHERE sender_id = $f");
+        Run("UPDATE OR IGNORE group_receipts SET peer_id = $t WHERE peer_id = $f");
+        Run("DELETE FROM group_receipts WHERE peer_id = $f");
+        Run("UPDATE groups SET members = replace(members, $f, $t) WHERE instr(members, $f) > 0");
+        Run("UPDATE reminders SET data = replace(data, $f, $t) WHERE instr(data, $f) > 0");
+        Run("DELETE FROM outbox WHERE peer_id = $f");
+        // Собеседник: если под новым Id уже есть — старая запись не нужна.
+        Run("UPDATE OR IGNORE contacts SET id = $t WHERE id = $f");
+        Run("DELETE FROM contacts WHERE id = $f");
+        transaction.Commit();
+        return changed > 0;
+    }
+
+    /// <summary>Вложение загружено на сервер (при переносе) — повторно не загружать.</summary>
+    public void SetServerFile(Guid messageId, Guid fileId)
+    {
+        using var cmd = Command("UPDATE messages SET server_file = $file WHERE id = $id");
+        cmd.Parameters.AddWithValue("$file", fileId.ToString());
+        cmd.Parameters.AddWithValue("$id", messageId.ToString());
+        cmd.ExecuteNonQuery();
+    }
+
+    public int CountMessages()
+    {
+        using var cmd = Command($"SELECT COUNT(*) FROM messages WHERE kind IN ({(int)MessageKind.Text}, {(int)MessageKind.Image}, {(int)MessageKind.File})");
+        return Convert.ToInt32(cmd.ExecuteScalar());
+    }
+
+    /// <summary>Перенесённые сообщения по порядку (время, Id) после заданного — для выгрузки на сервер пачками.</summary>
+    public List<StoredMessage> MessagesAfter(DateTime after, Guid afterId, int limit)
+    {
+        using var cmd = Command($"""
+            SELECT {MessageColumns}, peer_id FROM messages
+            WHERE kind IN ({(int)MessageKind.Text}, {(int)MessageKind.Image}, {(int)MessageKind.File})
+              AND id IN (SELECT id FROM import_queue)
+              AND (timestamp > $t OR (timestamp = $t AND id > $id))
+            ORDER BY timestamp, id LIMIT $limit
+            """);
+        cmd.Parameters.AddWithValue("$t", after.Ticks);
+        cmd.Parameters.AddWithValue("$id", afterId.ToString());
+        cmd.Parameters.AddWithValue("$limit", limit);
+        using var reader = cmd.ExecuteReader();
+        var result = new List<StoredMessage>();
+        while (reader.Read())
+            result.Add(new StoredMessage(Guid.Parse(reader.GetString(MessageColumnCount)), ReadMessage(reader)));
+        return result;
     }
 
     // ---- Служебное ----

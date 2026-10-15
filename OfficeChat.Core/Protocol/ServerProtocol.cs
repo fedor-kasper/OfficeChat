@@ -203,6 +203,8 @@ public sealed class MessageDto
     public bool Imported { get; set; }
     /// <summary>У перенесённого: 0 — нет отметок, 1 — доставлено, 2 — прочитано.</summary>
     public int ImportedState { get; set; }
+    /// <summary>У перенесённого своего: имя собеседника (он мог ещё не перейти на аккаунт).</summary>
+    public string RecipientName { get; set; } = "";
 }
 
 public sealed record EditData(Guid MessageId, string Text, DateTimeOffset? EditedAt = null, Guid? SenderId = null);
