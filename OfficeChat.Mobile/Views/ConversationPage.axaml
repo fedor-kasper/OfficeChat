@@ -91,6 +91,8 @@
                 <DockPanel>
                     <Button x:Name="AttachButton" DockPanel.Dock="Left" Classes="plain" Content="📎" FontSize="20"
                             VerticalAlignment="Bottom" Click="Attach_Click" />
+                    <Button x:Name="CameraButton" DockPanel.Dock="Left" Classes="plain" Content="📷" FontSize="20"
+                            VerticalAlignment="Bottom" ToolTip.Tip="Сделать снимок" Click="Camera_Click" />
                     <Button x:Name="StickersButton" DockPanel.Dock="Left" Classes="plain" Content="😊" FontSize="20"
                             VerticalAlignment="Bottom" Click="Stickers_Click" />
                     <Button x:Name="SendButton" DockPanel.Dock="Right" Classes="primary" Width="46" Height="46"

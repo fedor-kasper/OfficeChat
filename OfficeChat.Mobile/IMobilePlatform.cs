@@ -27,6 +27,12 @@ public interface IMobilePlatform
     /// <summary>Открыть файл из переписки в подходящей программе.</summary>
     Task OpenFileAsync(Avalonia.Controls.TopLevel top, string path);
 
+    /// <summary>Есть камера, которой можно сделать снимок для переписки.</summary>
+    bool CanTakePhoto { get; }
+
+    /// <summary>Снять фото камерой (JPEG, уменьшенный для отправки). null — снимок не сделали.</summary>
+    Task<byte[]?> TakePhotoAsync();
+
     /// <summary>Описание устройства для сервера (видно в списке устройств).</summary>
     string DeviceName { get; }
 
@@ -50,6 +56,10 @@ public sealed class DesktopPlatform : IMobilePlatform
         if (await top.StorageProvider.TryGetFileFromPathAsync(new Uri(path)) is { } file)
             await top.Launcher.LaunchFileAsync(file);
     }
+
+    public bool CanTakePhoto => false;
+
+    public Task<byte[]?> TakePhotoAsync() => Task.FromResult<byte[]?>(null);
 
     public string DeviceName => Environment.MachineName + " (проверка телефона)";
     public string PlatformName => "android-preview";

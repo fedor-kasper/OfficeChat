@@ -24,8 +24,41 @@ public class MainActivity : AvaloniaMainActivity<MobileApp>
         return base.CustomizeAppBuilder(builder).WithInterFont();
     }
 
+    /// <summary>Экран, открытый сейчас (для камеры: снимок возвращается в экран).</summary>
+    public static MainActivity? Current { get; private set; }
+
+    private const int PhotoRequest = 4242;
+    private TaskCompletionSource<bool>? _photo;
+
+    /// <summary>Открыть камеру; снимок запишется в target. true — снимок сделан.</summary>
+    public Task<bool> CapturePhotoAsync(Java.IO.File target)
+    {
+        _photo?.TrySetResult(false);
+        var uri = AndroidX.Core.Content.FileProvider.GetUriForFile(this, AndroidPlatform.FilesAuthority, target);
+        var intent = new Intent(global::Android.Provider.MediaStore.ActionImageCapture);
+        intent.PutExtra(global::Android.Provider.MediaStore.ExtraOutput, uri);
+        intent.AddFlags(ActivityFlags.GrantWriteUriPermission | ActivityFlags.GrantReadUriPermission);
+        _photo = new TaskCompletionSource<bool>();
+        StartActivityForResult(intent, PhotoRequest);
+        return _photo.Task;
+    }
+
+    protected override void OnActivityResult(int requestCode, Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        if (requestCode == PhotoRequest) _photo?.TrySetResult(resultCode == Result.Ok);
+    }
+
+    protected override void OnDestroy()
+    {
+        if (Current == this) Current = null;
+        _photo?.TrySetResult(false);
+        base.OnDestroy();
+    }
+
     protected override void OnCreate(Bundle? savedInstanceState)
     {
+        Current = this;
         base.OnCreate(savedInstanceState);
         AndroidPlatform.AskForNotifications(this);
         OpenFromIntent(Intent);
@@ -39,6 +72,7 @@ public class MainActivity : AvaloniaMainActivity<MobileApp>
 
     protected override void OnResume()
     {
+        Current = this;
         base.OnResume();
         MobileSession.IsForeground = true;
         // Вернулись на открытую переписку — новые в ней прочитаны.

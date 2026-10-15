@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Controls.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using OfficeChat.Client;
@@ -23,18 +24,55 @@ public sealed class ShellView : UserControl
         Background = Avalonia.Media.Brushes.White;
         AttachedToVisualTree += (_, _) =>
         {
-            if (TopLevel.GetTopLevel(this) is { } top) top.BackRequested += OnBackRequested;
+            if (TopLevel.GetTopLevel(this) is { } top)
+            {
+                top.BackRequested += OnBackRequested;
+                if (top.InputPane is { } pane) pane.StateChanged += OnInputPaneChanged;
+                if (top.InsetsManager is { } insets) insets.SafeAreaChanged += OnSafeAreaChanged;
+            }
+            UpdateInsets();
             if (_stack.Count == 0) ShowStart();
         };
         DetachedFromVisualTree += (_, _) =>
         {
-            if (TopLevel.GetTopLevel(this) is { } top) top.BackRequested -= OnBackRequested;
+            if (TopLevel.GetTopLevel(this) is { } top)
+            {
+                top.BackRequested -= OnBackRequested;
+                if (top.InputPane is { } pane) pane.StateChanged -= OnInputPaneChanged;
+                if (top.InsetsManager is { } insets) insets.SafeAreaChanged -= OnSafeAreaChanged;
+            }
             MobileSession.SessionExpired -= OnSessionExpired;
         };
+        SizeChanged += (_, _) => UpdateInsets();
         MobileSession.SessionExpired += OnSessionExpired;
     }
 
     public Page? Current => _stack.Count > 0 ? _stack[^1] : null;
+
+    /// <summary>Клавиатура открылась или закрылась (страница может прокрутить к полю ввода).</summary>
+    public event Action<bool>? KeyboardChanged;
+
+    private void OnInputPaneChanged(object? sender, InputPaneStateEventArgs e)
+    {
+        UpdateInsets();
+        KeyboardChanged?.Invoke(e.NewState == InputPaneState.Open);
+    }
+
+    private void OnSafeAreaChanged(object? sender, SafeAreaChangedArgs e) => UpdateInsets();
+
+    /// <summary>
+    /// Телефон рисует программу на весь экран: сверху строка состояния, снизу кнопки и клавиатура. Отступаем от них,
+    /// чтобы заголовок и поле ввода не оказались под ними (поле ввода поднимается вместе с клавиатурой).
+    /// </summary>
+    private void UpdateInsets()
+    {
+        var top = TopLevel.GetTopLevel(this);
+        var safe = top?.InsetsManager?.SafeAreaPadding ?? default;
+        double keyboard = 0;
+        if (top?.InputPane is { State: InputPaneState.Open } pane && pane.OccludedRect.Height > 0)
+            keyboard = Math.Max(0, Bounds.Height - pane.OccludedRect.Top);
+        _host.Margin = new Avalonia.Thickness(safe.Left, safe.Top, safe.Right, Math.Max(safe.Bottom, keyboard));
+    }
 
     /// <summary>Первая страница: переписки, если вход уже выполнен; иначе вход.</summary>
     private void ShowStart()

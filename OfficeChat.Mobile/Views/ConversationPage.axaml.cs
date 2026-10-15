@@ -52,12 +52,21 @@ public partial class ConversationPage : Page
         if (MobileSession.Chat is { } chat) chat.PresenceChanged += UpdateStatus;
         UpdateStatus();
         GameButton.IsVisible = _contact.IsPerson;
+        CameraButton.IsVisible = MobileSession.Platform.CanTakePhoto;
+        Shell.KeyboardChanged += OnKeyboardChanged;
         ScrollToEnd();
+    }
+
+    // Клавиатура открылась — последние сообщения остаются видны над полем ввода.
+    private void OnKeyboardChanged(bool open)
+    {
+        if (open) ScrollToEnd();
     }
 
     public override void OnDisappearing()
     {
         if (MobileSession.VisibleConversation == _contact) MobileSession.VisibleConversation = null;
+        Shell.KeyboardChanged -= OnKeyboardChanged;
         _contact.Messages.CollectionChanged -= OnMessagesChanged;
         _contact.PropertyChanged -= OnContactChanged;
         if (MobileSession.Chat is { } chat) chat.PresenceChanged -= UpdateStatus;
@@ -210,6 +219,27 @@ public partial class ConversationPage : Page
                 await Dialogs.InfoAsync(this, $"Не удалось отправить «{file.Name}»: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>Снимок камерой телефона — сразу в переписку.</summary>
+    private async void Camera_Click(object? sender, RoutedEventArgs e)
+    {
+        if (MobileSession.Chat is not { } chat) return;
+        byte[]? photo;
+        try
+        {
+            photo = await MobileSession.Platform.TakePhotoAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.Warn("Не удалось сделать снимок", ex);
+            await Dialogs.InfoAsync(this, $"Не удалось сделать снимок: {ex.Message}");
+            return;
+        }
+        if (photo == null) return; // передумали
+        var replyTo = _editing == null ? _replyTo : null;
+        if (_editing == null) CancelCompose();
+        chat.SendImage(_contact, photo, $"Фото {DateTime.Now:yyyy-MM-dd HH-mm-ss}.jpg", "", replyTo);
     }
 
     private Flyout? _stickerFlyout;
