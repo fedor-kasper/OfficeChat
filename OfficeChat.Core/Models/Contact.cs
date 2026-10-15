@@ -46,7 +46,8 @@ public sealed class Contact : INotifyPropertyChanged
     public string Subtitle => IsTyping ? TypingText
         : Group != null ? Group.StatusText
         : Peer == null ? "Отправить каждому, кто в сети"
-        : Peer.IsOnline ? $"{Peer.Machine} · {Peer.Address}" : "не в сети";
+        : Peer.LanOnline && Peer.Machine.Length > 0 ? $"{Peer.Machine} · {Peer.Address}"
+        : Peer.IsOnline ? "в сети" : "не в сети";
 
     public int UnreadCount
     {

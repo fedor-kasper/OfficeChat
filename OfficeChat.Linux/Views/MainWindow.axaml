@@ -110,11 +110,13 @@
         <DockPanel Grid.Column="0" Background="{StaticResource SidebarBrush}">
             <Border DockPanel.Dock="Top" Padding="14,12" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
                 <DockPanel>
-                    <Button DockPanel.Dock="Right" Content="Настройки" Padding="8,3" FontSize="12"
-                            VerticalAlignment="Center" Click="Settings_Click" />
+                    <Button x:Name="MenuButton" DockPanel.Dock="Right" Content="Настройки ▾" Padding="8,3" FontSize="12"
+                            VerticalAlignment="Center" Click="Menu_Click" />
                     <StackPanel>
                         <TextBlock Text="Вы" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
                         <TextBlock x:Name="MyNameText" FontSize="15" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <!-- С аккаунтом: есть ли связь с сервером -->
+                        <TextBlock x:Name="ServerStatusText" FontSize="11" IsVisible="False" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </DockPanel>
             </Border>

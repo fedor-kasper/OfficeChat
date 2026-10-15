@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
 using OfficeChat.Models;
+using OfficeChat.Protocol;
 
 namespace OfficeChat.Services;
 
@@ -35,6 +36,7 @@ public sealed class ReminderService : IDisposable
     {
         _chat = chat;
         _chat.ReminderPacketReceived += OnPacket;
+        _chat.ServerReminderEvent += OnServerEvent;
         foreach (var json in _chat.Store.LoadReminders())
         {
             if (FromJson(json) is { } reminder)
@@ -193,6 +195,7 @@ public sealed class ReminderService : IDisposable
                 {
                     Type = ChatPacket.ReminderDelete, Id = Guid.NewGuid(), TargetId = reminder.Id,
                 });
+            _chat.ServerRequest(Ops.ReminderDelete, new ReminderIdData(reminder.Id));
         }
         ReminderRemoved?.Invoke(reminder);
         Changed?.Invoke();
@@ -254,6 +257,8 @@ public sealed class ReminderService : IDisposable
         var json = JsonSerializer.Serialize(ToShared(reminder));
         foreach (var participant in reminder.Participants)
             _chat.SendReliable(participant.Id, new ChatPacket { Type = ChatPacket.ReminderShare, Id = Guid.NewGuid(), Text = json });
+        // С аккаунтом — на сервер: и участникам, и на свои другие устройства.
+        _chat.ServerRequest(Ops.ReminderPut, new ReminderPutData(reminder.Id, reminder.Participants.Select(p => p.Id).ToList(), json));
     }
 
     /// <summary>Сообщить автору и остальным участникам, что мы выполнили (или снова открыли) напоминание.</summary>
@@ -266,6 +271,7 @@ public sealed class ReminderService : IDisposable
             {
                 Type = ChatPacket.ReminderDone, Id = Guid.NewGuid(), TargetId = reminder.Id, Text = done ? "done" : "undone",
             });
+        _chat.ServerRequest(Ops.ReminderDone, new ReminderDoneData(reminder.Id, done));
         // У себя тоже отмечаем, если мы — участник чужого напоминания.
         MarkParticipant(reminder, _chat.MyId, done);
     }
@@ -299,6 +305,65 @@ public sealed class ReminderService : IDisposable
                 }
                 break;
         }
+    }
+
+    /// <summary>Событие с сервера: напоминание (новое или изменённое), удаление, отметка «выполнено».</summary>
+    private void OnServerEvent(string kind, JsonElement data)
+    {
+        switch (kind)
+        {
+            case EventKinds.Reminder when data.Deserialize<ReminderData>(ServerProtocol.Json) is { } shared:
+                OnShared(shared.Json, shared.CreatorId);
+                break;
+            case EventKinds.ReminderDelete when data.Deserialize<ReminderIdData>(ServerProtocol.Json) is { } deleted:
+                _chat.Store.AddReminderTombstone(deleted.Id);
+                if (Reminders.FirstOrDefault(r => r.Id == deleted.Id) is { } removed)
+                {
+                    Reminders.Remove(removed);
+                    _chat.Store.DeleteReminder(removed.Id);
+                    ReminderRemoved?.Invoke(removed);
+                    Changed?.Invoke();
+                }
+                break;
+            case EventKinds.ReminderDone when data.Deserialize<ReminderDoneData>(ServerProtocol.Json) is { } done:
+                if (Reminders.FirstOrDefault(r => r.Id == done.Id) is not { } target) break;
+                if (done.AccountId == _chat.MyId)
+                    ApplyOwnDone(target, done.Done);
+                else
+                    MarkParticipant(target, done.AccountId ?? Guid.Empty, done.Done);
+                Save(target);
+                Changed?.Invoke();
+                break;
+        }
+    }
+
+    /// <summary>«Готово» (или «вернуть») нажали на другом своём устройстве — здесь то же, без рассылки.</summary>
+    private void ApplyOwnDone(Reminder reminder, bool done)
+    {
+        if (done && !reminder.IsDone)
+        {
+            if (reminder.NextOccurrence(DateTime.Now) is { } next)
+            {
+                reminder.DueAt = next;
+                reminder.SnoozedUntil = null;
+                Schedule(reminder);
+            }
+            else
+            {
+                reminder.IsDone = true;
+                reminder.DoneAt = DateTime.Now;
+                reminder.IsAlerting = false;
+                reminder.NextAlertAt = null;
+            }
+            ReminderRemoved?.Invoke(reminder); // уведомление на этом устройстве больше не нужно
+        }
+        else if (!done && reminder.IsDone)
+        {
+            reminder.IsDone = false;
+            reminder.DoneAt = null;
+            Schedule(reminder);
+        }
+        MarkParticipant(reminder, _chat.MyId, done);
     }
 
     private void OnShared(string json, Guid from)
@@ -349,14 +414,15 @@ public sealed class ReminderService : IDisposable
             CreatorName = shared.CreatorName,
             CreatedAt = DateTime.Now,
             Participants = shared.Participants,
-            IsMine = false,
+            // Своё — созданное на другом своём устройстве.
+            IsMine = shared.CreatorId == _chat.MyId,
             Revision = shared.Revision,
         };
         Schedule(reminder);
         Reminders.Add(reminder);
         Save(reminder);
         Log.Info($"«{shared.CreatorName}» прислал(а) напоминание «{Short(shared.Text)}»");
-        ReminderReceived?.Invoke(reminder);
+        if (!reminder.IsMine) ReminderReceived?.Invoke(reminder);
         Changed?.Invoke();
     }
 
@@ -462,5 +528,6 @@ public sealed class ReminderService : IDisposable
     {
         _timer.Stop();
         _chat.ReminderPacketReceived -= OnPacket;
+        _chat.ServerReminderEvent -= OnServerEvent;
     }
 }

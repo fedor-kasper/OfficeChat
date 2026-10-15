@@ -20,6 +20,9 @@ public sealed class AppSettings
     /// <summary>Закреплённые переписки: всегда вверху списка (по Id собеседника или группы).</summary>
     public List<Guid> PinnedChats { get; set; } = new();
 
+    /// <summary>Выбрали «работать без аккаунта» — окно входа при запуске не показываем.</summary>
+    public bool NoAccount { get; set; }
+
     /// <summary>Недавно отправленные стикеры (по Id, последние — первыми).</summary>
     public List<string> RecentStickers { get; set; } = new();
 }

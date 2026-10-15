@@ -1,4 +1,5 @@
 using OfficeChat.Models;
+using OfficeChat.Protocol;
 
 namespace OfficeChat.Services;
 
@@ -53,6 +54,8 @@ public sealed partial class ChatService
         _store.SaveGroup(group);
         var contact = AddGroupContact(group);
         AddServiceRecord(contact, $"Вы создали группу «{group.Name}»: {Names(group.Members.Skip(1))}");
+        if (IsServerMode)
+            EnqueueServer(Ops.GroupCreate, new GroupCreateData(group.Id, group.Name, group.Members.Select(m => m.Id).ToList()));
         SendGroupUpdate(contact, ChatPacket.GroupCreated);
         Log.Info($"Создана группа «{group.Name}» ({group.Members.Count} участников)");
         return contact;
@@ -70,6 +73,7 @@ public sealed partial class ChatService
         _store.SaveGroup(group);
         UpdateGroupStatus(contact);
         AddServiceRecord(contact, $"Вы добавили: {Names(added)}");
+        if (IsServerMode) EnqueueServer(Ops.GroupAdd, new GroupAddData(group.Id, added.Select(m => m.Id).ToList()));
         // Новым участникам пакет создаст группу, остальным — сообщит о пополнении.
         SendGroupUpdate(contact, ChatPacket.GroupMembersAdded);
     }
@@ -83,6 +87,7 @@ public sealed partial class ChatService
         group.Name = name;
         _store.SaveGroup(group);
         AddServiceRecord(contact, $"Вы переименовали группу в «{name}»");
+        if (IsServerMode) EnqueueServer(Ops.GroupRename, new GroupRenameData(group.Id, name));
         SendGroupUpdate(contact, ChatPacket.GroupRenamed);
     }
 
@@ -91,6 +96,7 @@ public sealed partial class ChatService
     {
         var group = contact.Group!;
         group.Members.RemoveAll(m => m.Id == MyId);
+        if (IsServerMode) EnqueueServer(Ops.GroupLeave, new GroupIdData(group.Id));
         SendGroupUpdate(contact, ChatPacket.GroupLeft);
 
         _store.LeaveGroup(group.Id);
@@ -212,7 +218,10 @@ public sealed partial class ChatService
         message.RecipientCount = total;
         message.DeliveredCount = delivered;
         message.ReadCount = read;
-        message.Status = read > 0 ? MessageStatus.Read : delivered > 0 ? MessageStatus.Delivered : MessageStatus.Queued;
+        message.Status = read > 0 ? MessageStatus.Read
+            : delivered > 0 ? MessageStatus.Delivered
+            : message.Status == MessageStatus.Sent ? MessageStatus.Sent
+            : MessageStatus.Queued;
     }
 
     /// <summary>Отмечаем входящие в группе прочитанными и сообщаем об этом каждому автору.</summary>
@@ -232,7 +241,10 @@ public sealed partial class ChatService
             UnreadChanged?.Invoke();
         }
 
-        foreach (var bySender in unread.Where(m => m.SenderId != null && !m.IsSystem).GroupBy(m => m.SenderId!.Value))
+        var fromPeople = unread.Where(m => m.SenderId != null && !m.IsSystem).ToList();
+        if (IsServerMode && fromPeople.Count > 0)
+            EnqueueServer(Ops.Read, new MessageIdsData(fromPeople.Select(m => m.Id).ToList()));
+        foreach (var bySender in fromPeople.GroupBy(m => m.SenderId!.Value))
         {
             EnqueuePacket(bySender.Key, new ChatPacket
             {

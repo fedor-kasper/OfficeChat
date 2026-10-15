@@ -10,6 +10,7 @@ using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using OfficeChat.Client;
 using OfficeChat.Models;
 using OfficeChat.Platform;
 using OfficeChat.Services;
@@ -37,13 +38,17 @@ public partial class MainWindow : Window
     // Текст в поле ввода меняет сама программа (начало и конец редактирования) — это не набор текста.
     private bool _settingInput;
 
+    // Аккаунт, с которым работаем (null — без аккаунта, как раньше).
+    private readonly SavedAccount? _account;
+
     public MainWindow() : this(new AppSettings { DisplayName = "Дизайнер" }) { }
 
-    public MainWindow(AppSettings settings)
+    public MainWindow(AppSettings settings, ServerSession? session = null, SavedAccount? account = null)
     {
         InitializeComponent();
         Icon = AppIcon.Window;
         _settings = settings;
+        _account = account;
         MyNameText.Text = settings.DisplayName;
         Title = $"OfficeChat — {settings.DisplayName}";
 
@@ -52,6 +57,13 @@ public partial class MainWindow : Window
             IsConversationVisible = contact =>
                 contact == _current && IsVisible && IsActive && WindowState != WindowState.Minimized,
         };
+        if (session != null)
+        {
+            _chat.UseServer(session);
+            _chat.ServerStateChanged += UpdateServerStatus;
+            _chat.SessionExpired += OnSessionExpired;
+            UpdateServerStatus();
+        }
         _chat.PresenceChanged += OnPresenceChanged;
         _chat.MessageReceived += OnMessageReceived;
         ContactsList.ItemsSource = _chat.Contacts;
@@ -853,7 +865,48 @@ public partial class MainWindow : Window
         new ImageViewerWindow(message, sender).Show(this);
     }
 
-    // ---- Настройки ----
+    // ---- Настройки и аккаунт ----
+
+    private void Menu_Click(object? sender, RoutedEventArgs e)
+    {
+        var items = new List<Control>();
+        var settings = new MenuItem { Header = "Имя и автозапуск…" };
+        settings.Click += Settings_Click;
+        items.Add(settings);
+        if (_account != null)
+        {
+            items.Add(new Separator());
+            items.Add(new MenuItem { Header = $"Аккаунт: {_account.Login} · {_account.ServerName}", IsEnabled = false });
+            var password = new MenuItem { Header = "Сменить пароль…" };
+            password.Click += async (_, _) => await ChangePasswordAsync();
+            items.Add(password);
+            foreach (var other in AccountStore.All().Where(a => a.Id != _account.Id))
+            {
+                var open = new MenuItem { Header = $"Открыть: {other.DisplayName} ({other.Login})" };
+                open.Click += (_, _) => AccountLauncher.StartCopy(AccountLauncher.AccountArgument, other.Id.ToString());
+                items.Add(open);
+            }
+            var add = new MenuItem { Header = "Добавить аккаунт…" };
+            add.Click += (_, _) => AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+            items.Add(add);
+            var signOut = new MenuItem { Header = "Выйти из аккаунта…" };
+            signOut.Click += async (_, _) => await SignOutAsync();
+            items.Add(signOut);
+        }
+        else
+        {
+            items.Add(new Separator());
+            var signIn = new MenuItem { Header = "Войти в аккаунт…" };
+            signIn.Click += (_, _) =>
+            {
+                // Окно входа — в новой копии; эта (без аккаунта) закрывается, чтобы не было двух «я» в сети.
+                AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+                ExitApplication();
+            };
+            items.Add(signIn);
+        }
+        new ContextMenu { ItemsSource = items }.Open(MenuButton);
+    }
 
     private async void Settings_Click(object? sender, RoutedEventArgs e)
     {
@@ -862,13 +915,83 @@ public partial class MainWindow : Window
         await dialog.ShowDialog(this);
         if (!dialog.Saved) return;
 
-        _settings.DisplayName = dialog.EnteredName;
+        var name = dialog.EnteredName;
+        if (_account != null && _chat.Session != null && name != _settings.DisplayName)
+        {
+            // Имя аккаунта — на сервере: его видят коллеги на всех устройствах.
+            try
+            {
+                await _chat.Session.Api.ChangeProfileAsync(name);
+                _account.DisplayName = name;
+                AccountStore.Save(_account, makeLastUsed: false);
+            }
+            catch (Exception ex)
+            {
+                await Dialogs.Info(this, "Не удалось сменить имя: " + LoginFlow.Describe(ex));
+                name = _settings.DisplayName;
+            }
+        }
+        _settings.DisplayName = name;
         _settings.AutoStart = dialog.AutoStart;
         SettingsService.Save(_settings);
         DesktopIntegration.ApplyAutoStart(_settings.AutoStart);
         MyNameText.Text = _settings.DisplayName;
         Title = $"OfficeChat — {_settings.DisplayName}";
         _chat.AnnounceNow();
+    }
+
+    private void UpdateServerStatus()
+    {
+        ServerStatusText.IsVisible = true;
+        var connected = _chat.IsServerConnected;
+        ServerStatusText.Text = connected ? "● на связи с сервером" : "○ нет связи с сервером — работаем напрямую";
+        ServerStatusText.Foreground = Avalonia.Media.SolidColorBrush.Parse(connected ? "#16A34A" : "#B45309");
+        ToolTip.SetTip(ServerStatusText, connected
+            ? $"Сервер {_account?.ServerName} ({_account?.ServerHost}): переписка синхронизируется на все ваши устройства"
+            : "Сообщения уходят компьютерам напрямую; на сервер всё отправится, когда связь появится");
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (_chat.Session == null) return;
+        var (oldPassword, newPassword) = await Dialogs.ChangePassword(this);
+        if (newPassword == null) return;
+        try
+        {
+            await _chat.Session.Api.ChangePasswordAsync(oldPassword!, newPassword);
+            await Dialogs.Info(this, "Пароль изменён. На других устройствах вводить его не нужно — они остаются в аккаунте.");
+        }
+        catch (Exception ex)
+        {
+            await Dialogs.Info(this, "Пароль не изменён: " + LoginFlow.Describe(ex));
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        if (_account == null) return;
+        if (!await Dialogs.Confirm(this, $"Выйти из аккаунта «{_account.Login}» на этом компьютере?\n\n" +
+                                         "Переписка останется на сервере и на других ваших устройствах."))
+            return;
+        await AccountLauncher.SignOutAsync(_account, _chat.Session);
+        Program.ReleaseInstance();
+        AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+        ExitApplication();
+    }
+
+    /// <summary>Сервер больше не принимает вход (вышли на другом устройстве, сбросили пароль, заблокировали).</summary>
+    private async void OnSessionExpired(string reason)
+    {
+        if (_account == null) return;
+        UpdateServerStatus();
+        await Dialogs.Info(this, $"{reason}.\n\nПока работаем без сервера — напрямую с коллегами в сети.");
+        var login = new LoginWindow(_account, allowNoAccount: false);
+        await login.ShowDialog(this);
+        if (login.Account == null) return;
+        // Новый ключ — начинаем заново с этим аккаунтом.
+        Program.ReleaseInstance();
+        AccountLauncher.StartCopy(AccountLauncher.AccountArgument, login.Account.Id.ToString());
+        ExitApplication();
     }
 
     // ---- История и управление контактами ----

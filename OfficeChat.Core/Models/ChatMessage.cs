@@ -10,6 +10,8 @@ public enum MessageStatus
     Sending,
     Delivered,
     Read,
+    /// <summary>Принято сервером; дойдёт до адресата, когда его устройство появится в сети.</summary>
+    Sent,
 }
 
 public enum MessageKind
@@ -108,6 +110,9 @@ public sealed class ChatMessage : INotifyPropertyChanged
     public string FilePath { get; init; } = "";
 
     public long FileSize { get; init; }
+
+    /// <summary>Id файла вложения на сервере (null — ещё не загружен или работа без сервера).</summary>
+    public Guid? ServerFileId { get; set; }
 
     public string FileSizeText => FileSize switch
     {
@@ -292,6 +297,7 @@ public sealed class ChatMessage : INotifyPropertyChanged
             : "Отправляется…",
         MessageStatus.Delivered => "✓ Доставлено",
         MessageStatus.Read => "✓✓ Прочитано",
+        MessageStatus.Sent => "✓ Отправлено",
         _ => "",
     };
 
@@ -304,6 +310,7 @@ public sealed class ChatMessage : INotifyPropertyChanged
         _ when ReadCount > 0 => $"✓✓ Прочитали {ReadCount} из {RecipientCount}",
         _ when DeliveredCount >= RecipientCount => "✓ Доставлено",
         _ when DeliveredCount > 0 => $"✓ Доставлено {DeliveredCount} из {RecipientCount}",
+        _ when Status == MessageStatus.Sent => "✓ Отправлено",
         _ when IsRelayed => "⏳ Участники не в сети — передано коллегам, доставят, когда появятся",
         _ => "⏳ Участники не в сети — отправится, когда появятся",
     };

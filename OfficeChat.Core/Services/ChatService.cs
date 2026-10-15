@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Net;
 using System.Text.Json;
 using OfficeChat.Models;
+using OfficeChat.Protocol;
 
 namespace OfficeChat.Services;
 
@@ -118,6 +119,7 @@ public sealed partial class ChatService : IDisposable
         _discovery.Start();
         _retryTimer.Start();
         _typingTimer.Start();
+        StartServer();
     }
 
     /// <summary>История и прочие данные на диске (их же использует служба напоминаний).</summary>
@@ -158,6 +160,7 @@ public sealed partial class ChatService : IDisposable
         _settings.MutedChats.Remove(id);
         if (muted) _settings.MutedChats.Add(id);
         SettingsService.Save(_settings);
+        SyncSetting(MutedSetting, _settings.MutedChats);
         UnreadChanged?.Invoke();
     }
 
@@ -170,6 +173,7 @@ public sealed partial class ChatService : IDisposable
         _settings.PinnedChats.Remove(id);
         if (pinned) _settings.PinnedChats.Add(id);
         SettingsService.Save(_settings);
+        SyncSetting(PinnedSetting, _settings.PinnedChats);
     }
 
     // ---- «печатает…» ----
@@ -185,8 +189,12 @@ public sealed partial class ChatService : IDisposable
         var now = DateTime.UtcNow;
         if (_typingSent.TryGetValue(id, out var last) && now - last < TypingSendInterval) return;
         _typingSent[id] = now;
-        if (contact.IsGroup)
+        if (contact.IsGroup && IsServerConnected)
+            _connection!.Signal(null, contact.Key, TypingSignal);
+        else if (contact.IsGroup)
             NotifyGroupTyping(contact);
+        else if (ViaServer(contact.Peer!.Id))
+            _connection!.Signal(contact.Peer.Id, null, TypingSignal);
         else
             _ = SendPacketAsync(contact, new ChatPacket { Type = ChatPacket.Typing, Id = Guid.NewGuid() });
     }
@@ -320,6 +328,7 @@ public sealed partial class ChatService : IDisposable
     public async Task<bool> SendPacketAsync(Contact contact, ChatPacket packet)
     {
         var peer = contact.Peer;
+        if (peer != null && ViaServer(peer.Id)) return SendPacketViaServer(contact, packet);
         if (peer == null || peer.Address.Equals(IPAddress.None)) return false;
 
         Stamp(packet);
@@ -384,6 +393,8 @@ public sealed partial class ChatService : IDisposable
     {
         contact.Messages.Add(message);
         ResetTypingSent(contact);
+        // С аккаунтом — сообщение уходит на сервер (сразу или когда появится связь).
+        if (IsServerMode) EnqueueServerSend(message);
         if (contact.IsGroup)
         {
             PostToGroup(contact, message);
@@ -543,6 +554,9 @@ public sealed partial class ChatService : IDisposable
         if (message.Text == newText || (message.Kind == MessageKind.Text && newText.Length == 0)) return false;
 
         message.Text = newText;
+        // Уже на сервере — правка туда же (ещё ждёт отправки — уйдёт сразу с новым текстом).
+        if (IsServerMode && message.Status != MessageStatus.Queued)
+            EnqueueServer(Ops.Edit, new EditData(message.Id, newText));
         if (contact.IsGroup)
         {
             // Тем, кому сообщение ещё не ушло, оно уйдёт уже с новым текстом; остальным — правка.
@@ -590,6 +604,8 @@ public sealed partial class ChatService : IDisposable
         var pending = PendingTargetsOf(contact, message);
         RemoveMessage(contact, message);
         RecallRelayed(contact, message, pending);
+        if (forEveryone && message.CanDeleteForEveryone && IsServerMode && message.Status != MessageStatus.Queued)
+            EnqueueServer(Ops.Delete, new DeleteData(message.Id));
         if (forEveryone && message.CanDeleteForEveryone)
         {
             foreach (var peerId in reachedPeers)
@@ -674,6 +690,8 @@ public sealed partial class ChatService : IDisposable
     /// <summary>Ставит служебный пакет в очередь собеседнику; уйдёт по порядку, когда он будет в сети.</summary>
     private void EnqueuePacket(Guid peerId, ChatPacket packet)
     {
+        // С аккаунтом и при связи с сервером — всё через сервер (каждое действие ставит свой запрос туда).
+        if (ViaServer(peerId)) return;
         var item = _store.AddOutbox(peerId, JsonSerializer.Serialize(packet));
         _outbox.Add(item);
         OfferRelays();
@@ -691,12 +709,16 @@ public sealed partial class ChatService : IDisposable
         }
 
         var changed = false;
+        var read = new List<Guid>();
         foreach (var message in contact.Messages.Where(m => !m.IsOutgoing && !m.IsRead))
         {
             message.IsRead = true;
             Save(contact, message);
             changed = true;
+            if (!message.IsSystem) read.Add(message.Id);
         }
+        if (IsServerMode && read.Count > 0 && IsServerPeer(contact.Peer!.Id))
+            EnqueueServer(Ops.Read, new MessageIdsData(read));
         if (contact.UnreadCount != 0)
         {
             contact.UnreadCount = 0;
@@ -763,10 +785,12 @@ public sealed partial class ChatService : IDisposable
         var done = false;
         try
         {
-            if (contact != null && !await FlushMessagesAsync(contact, peer)) return;
+            // С этим собеседником работаем через сервер — напрямую только то, что храним за других.
+            var viaServer = ViaServer(peer.Id);
+            if (!viaServer && contact != null && !await FlushMessagesAsync(contact, peer)) return;
             // Служебные пакеты (в том числе «вас добавили в группу») — раньше сообщений групп.
-            if (!await FlushOutboxAsync(peer)) return;
-            if (!await FlushGroupMessagesAsync(peer)) return;
+            if (!viaServer && !await FlushOutboxAsync(peer)) return;
+            if (!viaServer && !await FlushGroupMessagesAsync(peer)) return;
             // Хранимое за других — тоже ему.
             done = await FlushRelaysAsync(peer);
         }
@@ -1090,7 +1114,7 @@ public sealed partial class ChatService : IDisposable
             UnreadChanged?.Invoke();
         }
 
-        MessageReceived?.Invoke(contact, message);
+        if (!_quietReceive) MessageReceived?.Invoke(contact, message);
     }
 
     private bool IsMyMessage(Contact contact, Guid id) =>
@@ -1194,7 +1218,8 @@ public sealed partial class ChatService : IDisposable
     /// <summary>Ушедший из сети компьютер без переписки убираем из списка, с перепиской — оставляем серым.</summary>
     private void RemoveIfForgotten(Contact contact)
     {
-        if (contact.IsGroup || contact.IsOnline || contact.Messages.Count > 0 || _keptPeers.Contains(contact.Peer!.Id)) return;
+        if (contact.IsGroup || contact.IsOnline || contact.Messages.Count > 0 || _keptPeers.Contains(contact.Peer!.Id) ||
+            IsServerPeer(contact.Peer.Id)) return;
         _contactsByPeer.Remove(contact.Peer!.Id);
         Contacts.Remove(contact);
         _store.DeleteContact(contact.Peer.Id);
@@ -1203,6 +1228,7 @@ public sealed partial class ChatService : IDisposable
 
     public void Dispose()
     {
+        _ = DisposeServerAsync();
         _retryTimer.Stop();
         _typingTimer.Stop();
         _discovery.Dispose();

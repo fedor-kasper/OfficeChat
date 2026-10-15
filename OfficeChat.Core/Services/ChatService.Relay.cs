@@ -89,6 +89,8 @@ public sealed partial class ChatService
     /// <summary>Отдать копию пакета для <paramref name="targetId"/> тем, кто в сети (или одному <paramref name="onlyTo"/>).</summary>
     private void HandOver(Guid targetId, ChatPacket packet, ChatMessage? message, Peer? onlyTo)
     {
+        // Адресату доставит сервер.
+        if (ViaServer(targetId)) return;
         var holders = onlyTo != null
             ? new List<Peer> { onlyTo }
             : _contactsByPeer.Values.Where(c => c.IsOnline).Select(c => c.Peer!).ToList();

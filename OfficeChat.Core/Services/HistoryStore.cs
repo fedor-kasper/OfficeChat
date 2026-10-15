@@ -16,6 +16,9 @@ public sealed record StoredContact(Guid Id, string Name, string Machine, IPAddre
 public sealed record OutboxItem(long Seq, Guid PeerId, string PacketJson);
 
 /// <summary>Чужой служебный пакет, который мы храним и передадим получателю, когда он появится в сети.</summary>
+/// <summary>Запрос, который нужно отправить серверу (переживает перезапуск и отсутствие связи).</summary>
+public sealed record ServerOutboxItem(long Seq, string Op, string Data);
+
 public sealed record RelayItem(Guid Id, Guid TargetId, Guid OriginId, string PacketJson, string? PayloadPath = null);
 
 /// <summary>
@@ -115,7 +118,16 @@ public sealed class HistoryStore : IDisposable
             CREATE TABLE IF NOT EXISTS seen_packets (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
             -- Свои сообщения, копии которых отданы коллегам на пересылку (отмена должна догнать копии).
             CREATE TABLE IF NOT EXISTS relayed_messages (id TEXT PRIMARY KEY);
+            -- Работа с сервером: что отправить (по порядку) и докуда обработан журнал событий.
+            CREATE TABLE IF NOT EXISTS server_outbox (
+                seq  INTEGER PRIMARY KEY AUTOINCREMENT,
+                op   TEXT NOT NULL,
+                data TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             """);
+        // Id файла вложения на сервере (загружен — повторно не загружаем).
+        AddColumnIfMissing("server_file", "TEXT NOT NULL DEFAULT ''");
         // Вложение (изображение) у пересылаемого пакета.
         AddColumnIfMissing("relay", "payload", "TEXT NOT NULL DEFAULT ''");
     }
@@ -482,11 +494,12 @@ public sealed class HistoryStore : IDisposable
         using var cmd = Command("""
             INSERT INTO messages (id, peer_id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind,
                                   file_name, file_path, file_size, reply_to, reply_author, reply_text, edited,
-                                  sender_id, sender_name, quiet, sticker)
+                                  sender_id, sender_name, quiet, sticker, server_file)
             VALUES ($id, $peer, $outgoing, $text, $timestamp, $broadcast, $status, $isRead, $receipt, $kind, $fileName,
-                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName, $quiet, $sticker)
+                    $filePath, $fileSize, $replyTo, $replyAuthor, $replyText, $edited, $senderId, $senderName, $quiet, $sticker,
+                    $serverFile)
             ON CONFLICT (id) DO UPDATE SET status = $status, is_read = $isRead, read_receipt_sent = $receipt,
-                                           text = $text, edited = $edited
+                                           text = $text, edited = $edited, server_file = $serverFile, file_path = $filePath
             """);
         cmd.Parameters.AddWithValue("$id", message.Id.ToString());
         cmd.Parameters.AddWithValue("$peer", peerId.ToString());
@@ -509,6 +522,7 @@ public sealed class HistoryStore : IDisposable
         cmd.Parameters.AddWithValue("$senderName", message.SenderName);
         cmd.Parameters.AddWithValue("$quiet", message.IsQuiet);
         cmd.Parameters.AddWithValue("$sticker", message.IsSticker);
+        cmd.Parameters.AddWithValue("$serverFile", message.ServerFileId?.ToString() ?? "");
         cmd.ExecuteNonQuery();
     }
 
@@ -520,6 +534,47 @@ public sealed class HistoryStore : IDisposable
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
         return (Guid.Parse(reader.GetString(MessageColumnCount)), ReadMessage(reader));
+    }
+
+    // ---- Сервер ----
+
+    public ServerOutboxItem AddServerOutbox(string op, string data)
+    {
+        using var cmd = Command("INSERT INTO server_outbox (op, data) VALUES ($op, $data) RETURNING seq");
+        cmd.Parameters.AddWithValue("$op", op);
+        cmd.Parameters.AddWithValue("$data", data);
+        return new ServerOutboxItem((long)cmd.ExecuteScalar()!, op, data);
+    }
+
+    public List<ServerOutboxItem> LoadServerOutbox()
+    {
+        using var cmd = Command("SELECT seq, op, data FROM server_outbox ORDER BY seq");
+        using var reader = cmd.ExecuteReader();
+        var result = new List<ServerOutboxItem>();
+        while (reader.Read()) result.Add(new ServerOutboxItem(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+        return result;
+    }
+
+    public void DeleteServerOutbox(long seq)
+    {
+        using var cmd = Command("DELETE FROM server_outbox WHERE seq = $seq");
+        cmd.Parameters.AddWithValue("$seq", seq);
+        cmd.ExecuteNonQuery();
+    }
+
+    public string? GetState(string key)
+    {
+        using var cmd = Command("SELECT value FROM state WHERE key = $key");
+        cmd.Parameters.AddWithValue("$key", key);
+        return cmd.ExecuteScalar() as string;
+    }
+
+    public void SetState(string key, string value)
+    {
+        using var cmd = Command("INSERT INTO state (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = $value");
+        cmd.Parameters.AddWithValue("$key", key);
+        cmd.Parameters.AddWithValue("$value", value);
+        cmd.ExecuteNonQuery();
     }
 
     // ---- Очередь служебных пакетов ----
@@ -629,9 +684,9 @@ public sealed class HistoryStore : IDisposable
 
     private const string MessageColumns =
         "id, outgoing, text, timestamp, broadcast, status, is_read, read_receipt_sent, kind, file_name, file_path, file_size, " +
-        "reply_to, reply_author, reply_text, edited, sender_id, sender_name, quiet, sticker";
+        "reply_to, reply_author, reply_text, edited, sender_id, sender_name, quiet, sticker, server_file";
 
-    private const int MessageColumnCount = 20;
+    private const int MessageColumnCount = 21;
 
     private static List<ChatMessage> ReadMessages(SqliteCommand cmd)
     {
@@ -674,6 +729,7 @@ public sealed class HistoryStore : IDisposable
             SenderName = reader.GetString(17),
             IsQuiet = reader.GetBoolean(18),
             IsSticker = reader.GetBoolean(19),
+            ServerFileId = reader.GetString(20) is { Length: > 0 } serverFile ? Guid.Parse(serverFile) : null,
         };
     }
 

@@ -1,0 +1,86 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OfficeChat.Views.LoginWindow"
+        Title="OfficeChat — вход"
+        Width="420" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterScreen">
+    <Window.Styles>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+        <Style Selector="ToggleButton.tab">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="Padding" Value="0,6" />
+        </Style>
+    </Window.Styles>
+
+    <StackPanel>
+        <Border Background="{StaticResource HeaderBrush}" Padding="20,16">
+            <StackPanel Spacing="2">
+                <TextBlock Text="OfficeChat" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+                <TextBlock x:Name="SubtitleText" Foreground="#DBEAFE" TextWrapping="Wrap"
+                           Text="Войдите один раз — переписка будет на всех ваших устройствах" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Margin="20,14,20,18">
+            <!-- Сервер: найден в сети / ищем / не найден (ввести адрес) -->
+            <Border Background="{StaticResource SidebarBrush}" CornerRadius="8" Padding="12,9">
+                <StackPanel Spacing="6">
+                    <DockPanel>
+                        <Button x:Name="ChangeServerButton" DockPanel.Dock="Right" Content="Другой адрес…" Classes="plain"
+                                Foreground="{StaticResource AccentBrush}" Padding="4,0" Click="ChangeServer_Click" />
+                        <Ellipse x:Name="ServerDot" DockPanel.Dock="Left" Width="8" Height="8" Margin="0,0,8,0"
+                                 VerticalAlignment="Center" Fill="#9CA3AF" />
+                        <TextBlock x:Name="ServerText" Text="Ищем сервер в сети…" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </DockPanel>
+                    <DockPanel x:Name="AddressPanel" IsVisible="False">
+                        <Button DockPanel.Dock="Right" Content="Подключиться" Margin="6,0,0,0" Click="Connect_Click" />
+                        <TextBox x:Name="AddressBox" Watermark="адрес сервера, например 192.168.1.10" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Вход / регистрация / новый пароль -->
+            <StackPanel x:Name="FormPanel">
+                <Grid x:Name="TabsGrid" ColumnDefinitions="*,*" Margin="0,14,0,2">
+                    <ToggleButton x:Name="SignInTab" Grid.Column="0" Classes="tab" Content="Вход" IsChecked="True"
+                                  CornerRadius="6,0,0,6" Click="SignInTab_Click" />
+                    <ToggleButton x:Name="RegisterTab" Grid.Column="1" Classes="tab" Content="Регистрация"
+                                  CornerRadius="0,6,6,0" Click="RegisterTab_Click" />
+                </Grid>
+
+                <TextBlock x:Name="ChangePasswordHint" IsVisible="False" Margin="0,14,0,0" TextWrapping="Wrap"
+                           Text="Вы вошли с временным паролем. Задайте свой — его будете вводить на других устройствах." />
+
+                <StackPanel x:Name="LoginPanel">
+                    <TextBlock Classes="label" Text="Логин" />
+                    <TextBox x:Name="LoginBox" MaxLength="32" />
+                </StackPanel>
+                <StackPanel x:Name="NamePanel" IsVisible="False">
+                    <TextBlock Classes="label" Text="Имя (его видят коллеги)" />
+                    <TextBox x:Name="NameBox" MaxLength="64" />
+                </StackPanel>
+                <TextBlock x:Name="PasswordLabel" Classes="label" Text="Пароль" />
+                <TextBox x:Name="PasswordBox" PasswordChar="•" />
+                <StackPanel x:Name="RepeatPanel" IsVisible="False">
+                    <TextBlock Classes="label" Text="Пароль ещё раз" />
+                    <TextBox x:Name="RepeatBox" PasswordChar="•" />
+                </StackPanel>
+
+                <Button x:Name="SubmitButton" Classes="flat" Content="Войти" Margin="0,18,0,0" Padding="0,9"
+                        HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" FontWeight="SemiBold"
+                        IsDefault="True" Click="Submit_Click" />
+                <TextBlock x:Name="ErrorText" Foreground="#DC2626" TextWrapping="Wrap" Margin="0,10,0,0" IsVisible="False" />
+            </StackPanel>
+
+            <Button x:Name="NoAccountButton" Classes="plain" Margin="0,14,0,0" HorizontalAlignment="Center"
+                    Foreground="{StaticResource MutedTextBrush}" Content="Работать без аккаунта (как раньше)"
+                    Click="NoAccount_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

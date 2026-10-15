@@ -15,9 +15,10 @@ public sealed class SingleInstance : IDisposable
     /// <summary>Другая копия попросила показать окно (вызывается не в UI-потоке).</summary>
     public event Action? ShowRequested;
 
-    public SingleInstance()
+    /// <param name="key">У каждого аккаунта своя копия программы — и свой сокет.</param>
+    public SingleInstance(string key = "main")
     {
-        var name = $"officechat-{Environment.UserName}.sock";
+        var name = key == "main" ? $"officechat-{Environment.UserName}.sock" : $"officechat-{Environment.UserName}-{key}.sock";
         var dir = Environment.GetEnvironmentVariable("XDG_RUNTIME_DIR");
         _path = !string.IsNullOrEmpty(dir) && Directory.Exists(dir) ? Path.Combine(dir, name) : "";
         // Путь Unix-сокета ограничен ~108 байтами — если не помещается, берём короткий в /tmp.

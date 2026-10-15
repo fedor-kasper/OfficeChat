@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
+using OfficeChat.Client;
 using OfficeChat.Platform;
 using OfficeChat.Services;
 using OfficeChat.Views;
@@ -48,41 +49,101 @@ public partial class App : Application
     {
         try
         {
-            if (Program.Instance != null)
-                Program.Instance.ShowRequested += () => Dispatcher.UIThread.Post(() => _mainWindow?.ShowFromTray());
+            ListenForShowRequests();
+            var account = Program.Account;
+            var loginRequested = args.Contains(AccountLauncher.LoginArgument);
 
-            var settings = SettingsService.Load();
-            Log.Info($"Настройки загружены: имя «{settings.DisplayName}», Id {settings.UserId}, автозапуск {settings.AutoStart}");
-            if (string.IsNullOrWhiteSpace(settings.DisplayName))
+            // Аккаунта нет — окно входа (если раньше не выбрали «работать без аккаунта»).
+            if (account == null && (loginRequested || !SettingsService.Load().NoAccount))
             {
-                Log.Info("Первый запуск — спрашиваем имя");
-                var dialog = new SettingsWindow(Environment.UserName, settings.AutoStart);
-                var closed = new TaskCompletionSource();
-                dialog.Closed += (_, _) => closed.TrySetResult();
-                dialog.Show();
-                await closed.Task;
-                if (!dialog.Saved)
+                Log.Info("Аккаунта нет — показываем вход");
+                var login = await ShowLoginAsync(null, allowNoAccount: !loginRequested);
+                if (login.Account != null)
                 {
-                    Log.Info("Ввод имени отменён — выходим");
+                    account = login.Account;
+                    if (!Program.ClaimAccount(account))
+                    {
+                        Log.Info("Этот аккаунт уже открыт в другой копии — показали её окно");
+                        desktop.Shutdown();
+                        return;
+                    }
+                    ListenForShowRequests();
+                }
+                else if (login.ChoseNoAccount)
+                {
+                    var root = SettingsService.Load();
+                    root.NoAccount = true;
+                    SettingsService.Save(root);
+                    Log.Info("Выбрана работа без аккаунта");
+                }
+                else
+                {
+                    Log.Info("Окно входа закрыто — выходим");
                     desktop.Shutdown();
                     return;
                 }
-                settings.DisplayName = dialog.EnteredName;
-                settings.AutoStart = dialog.AutoStart;
-                SettingsService.Save(settings);
-                Log.Info($"Имя сохранено: «{settings.DisplayName}»");
+            }
+
+            AppSettings settings;
+            ServerSession? session = null;
+            if (account != null)
+            {
+                session = AccountLauncher.CreateSession(account);
+                if (session == null)
+                {
+                    // Ключ не расшифровался (например, перенесли профиль) — входим заново.
+                    var again = await ShowLoginAsync(account, allowNoAccount: false);
+                    if (again.Account == null)
+                    {
+                        desktop.Shutdown();
+                        return;
+                    }
+                    account = again.Account;
+                    session = AccountLauncher.CreateSession(account)!;
+                }
+                settings = AccountLauncher.Activate(account);
+            }
+            else
+            {
+                settings = SettingsService.Load();
+                Log.Info($"Без аккаунта: имя «{settings.DisplayName}», Id {settings.UserId}, автозапуск {settings.AutoStart}");
+                if (string.IsNullOrWhiteSpace(settings.DisplayName))
+                {
+                    Log.Info("Первый запуск — спрашиваем имя");
+                    var dialog = new SettingsWindow(Environment.UserName, settings.AutoStart);
+                    var closed = new TaskCompletionSource();
+                    dialog.Closed += (_, _) => closed.TrySetResult();
+                    dialog.Show();
+                    await closed.Task;
+                    if (!dialog.Saved)
+                    {
+                        Log.Info("Ввод имени отменён — выходим");
+                        desktop.Shutdown();
+                        return;
+                    }
+                    settings.DisplayName = dialog.EnteredName;
+                    settings.AutoStart = dialog.AutoStart;
+                    SettingsService.Save(settings);
+                    Log.Info($"Имя сохранено: «{settings.DisplayName}»");
+                }
             }
             // Сначала меню (оно копирует значок), потом автозапуск — чтобы и он ссылался на значок.
             DesktopIntegration.EnsureMenuEntry();
             DesktopIntegration.ApplyAutoStart(settings.AutoStart);
 
             Log.Info("Создаём главное окно");
-            _mainWindow = new MainWindow(settings);
+            _mainWindow = new MainWindow(settings, session, account);
             // desktop.MainWindow не задаём: если назначить его до запуска цикла событий, Avalonia сама покажет
             // окно — и автозапуск «сразу в трей» открывал бы его. Программа и так живёт до явного выхода.
             // При автозапуске окно не показываем — программа сразу работает в трее.
-            if (!args.Contains(DesktopIntegration.TrayArgument))
+            var autostart = args.Contains(DesktopIntegration.TrayArgument);
+            if (!autostart)
                 _mainWindow.Show();
+
+            // Автозапуск: остальные аккаунты этого компьютера — каждый в своей копии.
+            if (autostart && account != null && !args.Contains(AccountLauncher.AccountArgument))
+                foreach (var other in AccountStore.All().Where(a => a.Id != account.Id))
+                    AccountLauncher.StartCopy(AccountLauncher.AccountArgument, other.Id.ToString(), DesktopIntegration.TrayArgument);
             Log.Info("Запуск завершён");
         }
         catch (Exception ex)
@@ -91,5 +152,21 @@ public partial class App : Application
             await Dialogs.Info(null, $"Не удалось запустить OfficeChat.\n\n{ex.Message}\n\nПодробности в логе:\n{Log.CurrentFile}");
             desktop.Shutdown(1);
         }
+    }
+
+    private void ListenForShowRequests()
+    {
+        if (Program.Instance != null)
+            Program.Instance.ShowRequested += () => Dispatcher.UIThread.Post(() => _mainWindow?.ShowFromTray());
+    }
+
+    private static async Task<LoginWindow> ShowLoginAsync(SavedAccount? previous, bool allowNoAccount)
+    {
+        var login = new LoginWindow(previous, allowNoAccount);
+        var closed = new TaskCompletionSource();
+        login.Closed += (_, _) => closed.TrySetResult();
+        login.Show();
+        await closed.Task;
+        return login;
     }
 }
