@@ -5,7 +5,6 @@ using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Windows.Threading;
 using OfficeChat.Models;
 
 namespace OfficeChat.Services;
@@ -44,7 +43,7 @@ public sealed class UpdateService : IDisposable
     private readonly ChatService _chat;
     private readonly Func<bool> _canRestartNow;
     private readonly Action _exit;
-    private readonly DispatcherTimer _timer;
+    private readonly UiTimer _timer;
     private readonly Dictionary<Guid, DateTime> _requested = new();
     private SignedPackage? _staged;
     private bool _installing;
@@ -78,7 +77,7 @@ public sealed class UpdateService : IDisposable
         CurrentVersion = Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0);
         _chat.UpdatePacketReceived += OnPacket;
 
-        _timer = new DispatcherTimer { Interval = CheckInterval };
+        _timer = new UiTimer { Interval = CheckInterval };
         _timer.Tick += (_, _) => Tick();
         _ = InitializeAsync();
     }

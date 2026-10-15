@@ -1,4 +1,3 @@
-using System.Windows.Threading;
 using OfficeChat.Models;
 
 namespace OfficeChat.Services;
@@ -26,7 +25,7 @@ public sealed class GameService : IDisposable
 
     private readonly List<(Guid PeerId, ChatPacket Packet)> _outbox = new();
     private readonly HashSet<Guid> _flushing = new();
-    private readonly DispatcherTimer _retryTimer;
+    private readonly UiTimer _retryTimer;
 
     /// <summary>Нас пригласили — нужно показать «Принять / Отклонить».</summary>
     public event Action<BoardGame>? InviteReceived;
@@ -43,7 +42,7 @@ public sealed class GameService : IDisposable
         _chat.GamePacketReceived += OnPacket;
         _chat.PresenceChanged += FlushAll;
 
-        _retryTimer = new DispatcherTimer { Interval = RetryInterval };
+        _retryTimer = new UiTimer { Interval = RetryInterval };
         _retryTimer.Tick += (_, _) => FlushAll();
         _retryTimer.Start();
     }

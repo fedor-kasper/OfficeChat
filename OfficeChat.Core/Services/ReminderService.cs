@@ -1,6 +1,5 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
-using System.Windows.Threading;
 using OfficeChat.Models;
 
 namespace OfficeChat.Services;
@@ -15,7 +14,7 @@ public sealed class ReminderService : IDisposable
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(15);
 
     private readonly ChatService _chat;
-    private readonly DispatcherTimer _timer;
+    private readonly UiTimer _timer;
     private DateTime _lastMinute;
 
     public ObservableCollection<Reminder> Reminders { get; } = new();
@@ -42,7 +41,7 @@ public sealed class ReminderService : IDisposable
                 Reminders.Add(reminder);
         }
 
-        _timer = new DispatcherTimer { Interval = TickInterval };
+        _timer = new UiTimer { Interval = TickInterval };
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
         _lastMinute = DateTime.Now;

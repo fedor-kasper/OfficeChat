@@ -1,3 +1,5 @@
 <Solution>
-  <Project Path="OfficeChat.csproj" />
+  <Project Path="OfficeChat.Core/OfficeChat.Core.csproj" />
+  <Project Path="OfficeChat.Windows/OfficeChat.Windows.csproj" />
+  <Project Path="OfficeChat.Linux/OfficeChat.Linux.csproj" />
 </Solution>

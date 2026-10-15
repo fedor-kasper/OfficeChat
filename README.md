@@ -40,20 +40,28 @@
 Linux-версия (Avalonia, пакет AppImage) — в папке [`OfficeChat.Linux`](OfficeChat.Linux/README.md).
 Протокол общий: компьютеры на Windows и Linux переписываются друг с другом.
 
+## Устройство репозитория
+
+| Папка | Что это |
+|---|---|
+| `OfficeChat.Core` | общий код всех версий: сеть, история, группы, игры, напоминания, стикеры |
+| `OfficeChat.Windows` | программа для Windows (WPF) |
+| `OfficeChat.Linux` | программа для Linux (Avalonia, AppImage) |
+
 ## Сборка
 
 Нужен .NET 10 SDK (только для сборки — пользователям он не нужен).
 
-**Один exe для раздачи по офису** — запустите `publish.cmd` или выполните:
+**Один exe для раздачи по офису** — запустите `OfficeChat.Windows\publish.cmd` или выполните:
 
 ```
-dotnet publish -p:PublishProfile=SingleExe
+dotnet publish OfficeChat.Windows/OfficeChat.Windows.csproj -p:PublishProfile=SingleExe
 ```
 
-Получится `bin\publish\OfficeChat.exe` (~75 МБ): .NET и все библиотеки уже внутри,
+Получится `OfficeChat.Windows\bin\publish\OfficeChat.exe` (~75 МБ): .NET и все библиотеки уже внутри,
 достаточно скопировать файл на компьютер и запустить. Нужна 64-битная Windows 10 или 11.
 
-Для разработки откройте `OfficeChat.slnx` в Visual Studio.
+Для разработки откройте `OfficeChat.slnx` в Visual Studio или Rider.
 
 ## Автоматическая сборка (GitHub Actions)
 
@@ -109,4 +117,4 @@ dotnet publish -p:PublishProfile=SingleExe
 ## Лицензии
 
 Встроенные стикеры — [Microsoft Fluent Emoji](https://github.com/microsoft/fluentui-emoji)
-(© Microsoft Corporation, лицензия MIT), см. `Assets/Stickers/LICENSE.txt`.
+(© Microsoft Corporation, лицензия MIT), см. `OfficeChat.Core/Assets/Stickers/LICENSE.txt`.

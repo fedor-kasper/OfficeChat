@@ -4,8 +4,7 @@
 # - метка вида v1.2.0 — дополнительно создаётся GitHub Release с этими файлами;
 # - вручную — кнопка «Run workflow» на вкладке Actions.
 #
-# Один и тот же файл в обеих ветках: AppImage собирается, только если в ветке есть Linux-версия
-# (папка OfficeChat.Linux).
+# Проекты: OfficeChat.Core (общий код), OfficeChat.Windows (WPF), OfficeChat.Linux (Avalonia).
 #
 # Версия — 1.1.<номер запуска>. Если в секретах репозитория есть UPDATE_SIGNING_KEY, файлы подписываются:
 # тогда программы в офисе обновляются друг от друга по сети. Без ключа сборка работает как обычно,
@@ -45,14 +44,14 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Сборка OfficeChat.exe (один файл, .NET не нужен)
-        run: dotnet publish OfficeChat.csproj -p:PublishProfile=SingleExe -p:Version=$VERSION
+        run: dotnet publish OfficeChat.Windows/OfficeChat.Windows.csproj -p:PublishProfile=SingleExe -p:Version=$VERSION
 
       - name: Подпись для обновления по сети
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
           if [ -n "$UPDATE_SIGNING_KEY" ]; then
-            tools/sign-update.sh bin/publish/OfficeChat.exe "$VERSION" win-x64
+            tools/sign-update.sh OfficeChat.Windows/bin/publish/OfficeChat.exe "$VERSION" win-x64
           else
             echo "::warning::Секрет UPDATE_SIGNING_KEY не задан — сборка без подписи, обновление по сети работать не будет"
           fi
@@ -60,7 +59,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: OfficeChat-windows-x64
-          path: bin/publish/OfficeChat.exe
+          path: OfficeChat.Windows/bin/publish/OfficeChat.exe
           if-no-files-found: error
 
   linux:
@@ -69,29 +68,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Есть ли в ветке Linux-версия
-        id: check
-        run: |
-          if [ -f OfficeChat.Linux/build-appimage.sh ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "В этой ветке нет Linux-версии — AppImage не собираем."
-          fi
-
       - uses: actions/setup-dotnet@v4
-        if: steps.check.outputs.present == 'true'
         with:
           dotnet-version: "10.0.x"
 
       - name: Сборка AppImage
-        if: steps.check.outputs.present == 'true'
         run: |
           ./OfficeChat.Linux/build-appimage.sh
           # Имя без версии — удобно для постоянной ссылки на последнюю сборку
           mv OfficeChat.Linux/dist/OfficeChat-*-x86_64.AppImage OfficeChat.Linux/dist/OfficeChat-x86_64.AppImage
 
       - name: Подпись для обновления по сети
-        if: steps.check.outputs.present == 'true'
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
         run: |
@@ -102,7 +89,6 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v4
-        if: steps.check.outputs.present == 'true'
         with:
           name: OfficeChat-linux-x86_64
           path: OfficeChat.Linux/dist/OfficeChat-x86_64.AppImage

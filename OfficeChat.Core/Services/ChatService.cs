@@ -2,7 +2,6 @@ using System.IO;
 using System.Collections.ObjectModel;
 using System.Net;
 using System.Text.Json;
-using System.Windows.Threading;
 using OfficeChat.Models;
 
 namespace OfficeChat.Services;
@@ -30,8 +29,8 @@ public sealed partial class ChatService : IDisposable
     private readonly HashSet<Guid> _flushing = new();
     // Собеседники, которых нельзя убирать из списка (например, с ними идёт игра).
     private readonly HashSet<Guid> _keptPeers = new();
-    private readonly DispatcherTimer _retryTimer;
-    private readonly DispatcherTimer _typingTimer;
+    private readonly UiTimer _retryTimer;
+    private readonly UiTimer _typingTimer;
     // Когда последний раз сообщали собеседнику, что мы печатаем.
     private readonly Dictionary<Guid, DateTime> _typingSent = new();
     // Служебные пакеты (правки, удаления), которые ещё не дошли до собеседников. Копия — в базе.
@@ -99,10 +98,10 @@ public sealed partial class ChatService : IDisposable
         _messaging = new MessagingService();
         _messaging.PacketReceived += OnPacketReceived;
 
-        _retryTimer = new DispatcherTimer { Interval = RetryInterval };
+        _retryTimer = new UiTimer { Interval = RetryInterval };
         _retryTimer.Tick += (_, _) => FlushAll();
 
-        _typingTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _typingTimer = new UiTimer { Interval = TimeSpan.FromSeconds(1) };
         _typingTimer.Tick += (_, _) => ExpireTyping();
 
         _outbox = _store.LoadOutbox();

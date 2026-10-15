@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Общий код всех версий OfficeChat (Windows, Linux, а дальше Android и сервер):
+    модели, сеть, история, игры, напоминания, стикеры. Без зависимостей от WPF или Avalonia.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OfficeChat</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+
+  <!-- Встроенные наборы стикеров (Microsoft Fluent Emoji, MIT — см. Assets/Stickers/LICENSE.txt) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\Stickers\**\*.png" LogicalName="Stickers/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

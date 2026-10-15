@@ -12,18 +12,9 @@
     <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
-  <!-- Общий с Windows-версией код: сеть, история, игра, изображения, лог.
-       Файлы не копируются — подключаются из корня репозитория. -->
+  <!-- Общий код всех версий: сеть, история, игры, напоминания, стикеры -->
   <ItemGroup>
-    <Compile Include="..\Models\*.cs" Link="Shared\Models\%(Filename)%(Extension)" />
-    <Compile Include="..\Services\*.cs"
-             Exclude="..\Services\AutoStartService.cs;..\Services\FirewallService.cs"
-             Link="Shared\Services\%(Filename)%(Extension)" />
-  </ItemGroup>
-
-  <!-- Встроенные наборы стикеров (Microsoft Fluent Emoji, MIT) -->
-  <ItemGroup>
-    <EmbeddedResource Include="..\Assets\Stickers\**\*.png" LogicalName="Stickers/%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="..\OfficeChat.Core\OfficeChat.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,7 +22,6 @@
     <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
   </ItemGroup>
 
 </Project>

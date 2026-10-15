@@ -11,8 +11,9 @@
     <!-- Позволяет собирать проект не только на Windows (например, в CI) -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyTitle>Office Chat</AssemblyTitle>
-    <!-- Linux-версия (Avalonia) лежит в своей папке и собирается отдельно -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);OfficeChat.Linux/**</DefaultItemExcludes>
+    <!-- Имя exe не меняем: по нему работает обновление по сети и ярлыки пользователей -->
+    <AssemblyName>OfficeChat</AssemblyName>
+    <RootNamespace>OfficeChat</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,12 +23,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
-  </ItemGroup>
-
-  <!-- Встроенные наборы стикеров (Microsoft Fluent Emoji, MIT — см. Assets/Stickers/LICENSE.txt) -->
-  <ItemGroup>
-    <EmbeddedResource Include="Assets\Stickers\**\*.png" LogicalName="Stickers/%(RecursiveDir)%(Filename)%(Extension)" />
+    <ProjectReference Include="..\OfficeChat.Core\OfficeChat.Core.csproj" />
   </ItemGroup>
 
 </Project>
