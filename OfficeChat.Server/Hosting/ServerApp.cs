@@ -39,6 +39,8 @@ public static class ServerApp
             kestrel.ListenAnyIP(options.Port, listen =>
             {
                 listen.Protocols = HttpProtocols.Http1AndHttp2;
+                // Открыли как http:// — перенаправляем на https://, а не обрываем соединение.
+                listen.Use(PlainHttpRedirect.Middleware);
                 listen.UseHttps(certificate);
             });
         });
@@ -69,6 +71,8 @@ public static class ServerApp
         {
             log.LogInformation("OfficeChat Server {Version} запущен: порт {Port}, данные — {Folder}", Version, options.Port,
                 options.DataFolder);
+            log.LogInformation("Страница администрирования: https://localhost:{Port}/admin/ (с других компьютеров — " +
+                               "https://АДРЕС-СЕРВЕРА:{Port}/admin/)", options.Port, options.Port);
             log.LogInformation("Отпечаток сертификата: {Fingerprint}", FormatFingerprint(identity.Fingerprint));
         });
         return app;

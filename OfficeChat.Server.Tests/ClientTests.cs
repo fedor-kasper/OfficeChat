@@ -162,6 +162,23 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task Plain_http_is_redirected_to_https()
+    {
+        await using var server = new RealServer();
+        await server.StartAsync();
+        // Адрес набрали без https:// — браузер идёт по http на тот же порт: должен получить перенаправление,
+        // а не оборванное соединение («пустой ответ»).
+        using var http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false });
+        using var response = await http.GetAsync($"http://localhost:{server.Options.Port}/admin/?x=1");
+        Assert.Equal(HttpStatusCode.MovedPermanently, response.StatusCode);
+        Assert.Equal($"https://localhost:{server.Options.Port}/admin/?x=1", response.Headers.Location?.ToString());
+
+        // HTTPS на том же порту работает как раньше.
+        using var api = server.Api();
+        Assert.Equal("Тестовый сервер", (await api.InfoAsync()).Name);
+    }
+
+    [Fact]
     public async Task Revoked_device_gets_auth_failed()
     {
         await using var server = new RealServer();
