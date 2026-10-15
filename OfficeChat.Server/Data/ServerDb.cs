@@ -131,6 +131,18 @@ public sealed class ServerDb
                 value      TEXT NOT NULL,
                 PRIMARY KEY (account_id, key)
             );
+            -- Старые Id программы (до аккаунтов, по одному на компьютер): чей это теперь аккаунт.
+            CREATE TABLE IF NOT EXISTS legacy_ids (
+                legacy_id  TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL,
+                claimed_at INTEGER NOT NULL
+            );
+            -- Участники перенесённых групп, ещё не перешедшие на аккаунты: войдут в группу, когда перейдут.
+            CREATE TABLE IF NOT EXISTS group_legacy_members (
+                group_id  TEXT NOT NULL,
+                legacy_id TEXT NOT NULL,
+                PRIMARY KEY (group_id, legacy_id)
+            );
             """);
     }
 
@@ -397,6 +409,57 @@ public sealed class ServerDb
     public bool CanSee(Guid accountId, MessageDto message) =>
         message.SenderId == accountId || message.RecipientId == accountId ||
         (message.GroupId is { } groupId && IsGroupMember(groupId, accountId));
+
+    // ---- Старые Id (до аккаунтов) ----
+
+    public List<LegacyMapping> LegacyMappings() =>
+        Query("SELECT legacy_id, account_id FROM legacy_ids",
+            r => new LegacyMapping(Guid.Parse(r.GetString(0)), Guid.Parse(r.GetString(1))));
+
+    /// <summary>Аккаунт по Id: сам аккаунт или старый Id, перенесённый в аккаунт. null — неизвестно.</summary>
+    public Guid? ResolveAccount(Guid id)
+    {
+        if (AccountExists(id)) return id;
+        return Scalar("SELECT account_id FROM legacy_ids WHERE legacy_id = $id", ("$id", Id(id))) is string account
+            ? Guid.Parse(account)
+            : null;
+    }
+
+    /// <summary>
+    /// Закрепить старый Id за аккаунтом. true — теперь (или уже был) за ним; false — за другим аккаунтом.
+    /// Сообщения, где он был отправителем или получателем, переписываются на аккаунт.
+    /// </summary>
+    public bool ClaimLegacy(Guid accountId, Guid legacyId)
+    {
+        var owner = Scalar("SELECT account_id FROM legacy_ids WHERE legacy_id = $id", ("$id", Id(legacyId))) as string;
+        if (owner != null) return owner == Id(accountId);
+        if (AccountExists(legacyId)) return false;
+        NonQuery("INSERT INTO legacy_ids (legacy_id, account_id, claimed_at) VALUES ($l, $a, $now)",
+            ("$l", Id(legacyId)), ("$a", Id(accountId)), ("$now", Now()));
+        // В данных сообщения Id лежат той же строкой — заменяем и там.
+        NonQuery("UPDATE messages SET sender_id = $a, data = replace(data, $l, $a) WHERE sender_id = $l",
+            ("$l", Id(legacyId)), ("$a", Id(accountId)));
+        NonQuery("UPDATE messages SET recipient_id = $a, data = replace(data, $l, $a) WHERE recipient_id = $l",
+            ("$l", Id(legacyId)), ("$a", Id(accountId)));
+        return true;
+    }
+
+    /// <summary>Группы, куда этот старый Id ждали; ожидание снимается (аккаунт добавляет вызывающий).</summary>
+    public List<Guid> TakePendingGroups(Guid legacyId)
+    {
+        var groups = Query("SELECT group_id FROM group_legacy_members WHERE legacy_id = $l",
+            r => Guid.Parse(r.GetString(0)), ("$l", Id(legacyId)));
+        NonQuery("DELETE FROM group_legacy_members WHERE legacy_id = $l", ("$l", Id(legacyId)));
+        return groups;
+    }
+
+    public void AddPendingGroupMember(Guid groupId, Guid legacyId) =>
+        NonQuery("INSERT OR IGNORE INTO group_legacy_members (group_id, legacy_id) VALUES ($g, $l)",
+            ("$g", Id(groupId)), ("$l", Id(legacyId)));
+
+    public bool IsPendingGroupMember(Guid groupId, Guid legacyId) =>
+        Scalar("SELECT 1 FROM group_legacy_members WHERE group_id = $g AND legacy_id = $l",
+            ("$g", Id(groupId)), ("$l", Id(legacyId))) != null;
 
     // ---- Группы ----
 

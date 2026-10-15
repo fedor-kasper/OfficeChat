@@ -15,7 +15,7 @@ public sealed class ClientError(string code, string message) : Exception(message
 /// настройки и сигналы. Всё, что меняет переписку, пишется в журналы затронутых аккаунтов — так об этом
 /// узнают все их устройства, в том числе те, что сейчас не в сети.
 /// </summary>
-public sealed class ChatLogic(ServerDb db, Hub hub, ILogger<ChatLogic> log)
+public sealed partial class ChatLogic(ServerDb db, Hub hub, ILogger<ChatLogic> log)
 {
     private const int MaxReminderJson = 64 * 1024;
     private const int MaxSettingValue = 64 * 1024;

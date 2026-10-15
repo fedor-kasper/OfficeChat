@@ -42,6 +42,24 @@ public static class Endpoints
                 .Select(a => new DirectoryEntry(a.Id, a.Login, a.DisplayName, online.Contains(a.Id), a.LastSeen));
         }).RequireDevice();
 
+        // Перенос старой переписки (до аккаунтов).
+        api.MapGet("/legacy", (ServerDb db) => db.LegacyMappings()).RequireDevice();
+        api.MapPost("/legacy/claim", async (LegacyClaimRequest request, HttpContext ctx, ChatLogic chat) =>
+            Results.Json(await chat.ClaimLegacyAsync(ctx.Account().Id, request.LegacyIds ?? new List<Guid>()), ServerProtocol.Json))
+            .RequireDevice();
+        api.MapPost("/import", async (ImportRequest request, HttpContext ctx, ChatLogic chat) =>
+        {
+            try
+            {
+                return Results.Json(await chat.ImportAsync(ctx.Account().Id,
+                    request with { Messages = request.Messages ?? new(), Groups = request.Groups ?? new() }), ServerProtocol.Json);
+            }
+            catch (ClientError ex)
+            {
+                return Auth.Error(400, ex.Code, ex.Message);
+            }
+        }).RequireDevice();
+
         api.MapPost("/files", UploadFile).RequireDevice();
         api.MapGet("/files/{id:guid}", DownloadFile).RequireDevice();
 

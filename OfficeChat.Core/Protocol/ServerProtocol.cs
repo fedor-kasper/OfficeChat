@@ -88,6 +88,8 @@ public static class Ops
     public const string Error = "error";
     public const string Presence = "presence";
     public const string Directory = "directory";
+    /// <summary>Сотрудник перенёс свои старые Id (до аккаунтов): Data — список <see cref="LegacyMapping"/>.</summary>
+    public const string Legacy = "legacy";
     public const string Pong = "pong";
 }
 
@@ -104,6 +106,8 @@ public static class GroupActions
     public const string Renamed = "renamed";
     public const string Added = "added";
     public const string Left = "left";
+    /// <summary>Группа перенесена из старой переписки (без аккаунтов) — без служебной записи в истории.</summary>
+    public const string Imported = "imported";
 }
 
 // ---- HTTP ----
@@ -195,6 +199,10 @@ public sealed class MessageDto
     public DateTimeOffset SentAt { get; set; }
     /// <summary>Когда сервер принял сообщение — заполняет сервер.</summary>
     public DateTimeOffset ServerTime { get; set; }
+    /// <summary>Перенесено из старой переписки (до аккаунтов): без уведомлений, статус — из <see cref="ImportedState"/>.</summary>
+    public bool Imported { get; set; }
+    /// <summary>У перенесённого: 0 — нет отметок, 1 — доставлено, 2 — прочитано.</summary>
+    public int ImportedState { get; set; }
 }
 
 public sealed record EditData(Guid MessageId, string Text, DateTimeOffset? EditedAt = null, Guid? SenderId = null);
@@ -237,3 +245,25 @@ public sealed record ReminderDoneData(Guid Id, bool Done, Guid? AccountId = null
 public sealed record SettingsData(string Key, string Value);
 
 public sealed record SignalData(Guid? To, Guid? GroupId, string Type, JsonElement? Payload);
+
+// ---- Перенос старой переписки (до аккаунтов) ----
+
+/// <summary>Старый Id программы (компьютера) — теперь это такой-то аккаунт.</summary>
+public sealed record LegacyMapping(Guid LegacyId, Guid AccountId);
+
+public sealed record LegacyClaimRequest(List<Guid> LegacyIds);
+
+/// <summary>Claimed — теперь за этим аккаунтом; Taken — уже за другим.</summary>
+public sealed record LegacyClaimResponse(List<Guid> Claimed, List<Guid> Taken);
+
+/// <summary>Группа из старой переписки: участники — по аккаунтам или старым Id.</summary>
+public sealed record ImportedGroup(Guid Id, string Name, List<Guid> MemberIds);
+
+/// <summary>
+/// Пачка старой переписки. Сообщения — как <see cref="MessageDto"/> с Imported = true: свои — SenderId = аккаунт,
+/// RecipientId = собеседник; чужие — SenderId = собеседник, RecipientId = аккаунт; в группе — GroupId.
+/// Собеседник — по аккаунту или по старому Id.
+/// </summary>
+public sealed record ImportRequest(List<MessageDto> Messages, List<ImportedGroup> Groups);
+
+public sealed record ImportResponse(int Messages, int Groups);
