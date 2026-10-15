@@ -87,6 +87,7 @@ public static class Endpoints
         var deviceId = Guid.NewGuid();
         db.AddDevice(deviceId, account.Id, CleanName(device?.Name) is { Length: > 0 } n ? n : "Устройство",
             CleanName(device?.Platform, 32), Tokens.HashOf(token));
+        db.TouchAccount(account.Id);
         return new AuthResponse(token, deviceId, account.ToDto());
     }
 

@@ -1,10 +1,11 @@
-# Сборка OfficeChat: exe для Windows и AppImage для Linux.
+# Сборка OfficeChat: exe для Windows, AppImage для Linux и сервер (Windows и Linux).
 #
 # - каждый push и pull request — файлы появляются в Actions → запуск → «Artifacts»;
 # - метка вида v1.2.0 — дополнительно создаётся GitHub Release с этими файлами;
 # - вручную — кнопка «Run workflow» на вкладке Actions.
 #
-# Проекты: OfficeChat.Core (общий код), OfficeChat.Windows (WPF), OfficeChat.Linux (Avalonia).
+# Проекты: OfficeChat.Core (общий код), OfficeChat.Windows (WPF), OfficeChat.Linux (Avalonia),
+# OfficeChat.Server (сервер, тесты — OfficeChat.Server.Tests).
 #
 # Версия — 1.1.<номер запуска>. Если в секретах репозитория есть UPDATE_SIGNING_KEY, файлы подписываются:
 # тогда программы в офисе обновляются друг от друга по сети. Без ключа сборка работает как обычно,
@@ -94,10 +95,41 @@ jobs:
           path: OfficeChat.Linux/dist/OfficeChat-x86_64.AppImage
           if-no-files-found: error
 
+  server:
+    name: Сервер (Windows и Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Тесты сервера
+        run: dotnet test OfficeChat.Server.Tests/OfficeChat.Server.Tests.csproj
+
+      - name: Сборка сервера (один файл, .NET не нужен)
+        run: |
+          for rid in win-x64 linux-x64; do
+            dotnet publish OfficeChat.Server/OfficeChat.Server.csproj -c Release -r $rid --self-contained true \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true \
+              -p:DebugType=none -p:Version=$VERSION -o server-dist/$rid
+          done
+          mv server-dist/win-x64/officechat-server.exe server-dist/officechat-server-windows-x64.exe
+          mv server-dist/linux-x64/officechat-server server-dist/officechat-server-linux-x64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OfficeChat-server
+          path: |
+            server-dist/officechat-server-windows-x64.exe
+            server-dist/officechat-server-linux-x64
+          if-no-files-found: error
+
   release:
     name: Выпуск (GitHub Release)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    needs: [windows, linux, server]
     runs-on: ubuntu-latest
     permissions:
       contents: write

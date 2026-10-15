@@ -40,6 +40,13 @@
 Linux-версия (Avalonia, пакет AppImage) — в папке [`OfficeChat.Linux`](OfficeChat.Linux/README.md).
 Протокол общий: компьютеры на Windows и Linux переписываются друг с другом.
 
+## Сервер и аккаунты (в работе)
+
+Готовится переход на сервер в офисе: у каждого сотрудника будет аккаунт (логин и пароль, вводится
+один раз), переписка — общая на всех его устройствах, включая телефоны на Android. Сам сервер уже
+готов — см. [OfficeChat.Server](OfficeChat.Server/README.md); приложения подключатся к нему на
+следующем этапе, а пока работают между собой напрямую, как и раньше.
+
 ## Устройство репозитория
 
 | Папка | Что это |
@@ -47,6 +54,9 @@ Linux-версия (Avalonia, пакет AppImage) — в папке [`OfficeCha
 | `OfficeChat.Core` | общий код всех версий: сеть, история, группы, игры, напоминания, стикеры |
 | `OfficeChat.Windows` | программа для Windows (WPF) |
 | `OfficeChat.Linux` | программа для Linux (Avalonia, AppImage) |
+| `OfficeChat.Server` | сервер: аккаунты, вся переписка, синхронизация устройств — [установка](OfficeChat.Server/README.md) |
+| `OfficeChat.Server.Tests` | тесты сервера |
+| `docs` | [протокол сервера](docs/SERVER-PROTOCOL.md) |
 
 ## Сборка
 

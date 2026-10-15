@@ -13,6 +13,9 @@
     <AssemblyTitle>OfficeChat Server</AssemblyTitle>
     <Version>1.0.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- Сервер — один файл: без web.config для IIS и манифестов статических файлов -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
   </PropertyGroup>
 
   <ItemGroup>

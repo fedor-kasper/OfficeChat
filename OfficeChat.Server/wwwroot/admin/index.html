@@ -1,1 +1,370 @@
-<!doctype html><title>OfficeChat Server</title>
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OfficeChat — администрирование</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #111827; --muted: #6b7280; --line: #e5e7eb;
+    --accent: #2563eb; --accent-text: #ffffff; --danger: #dc2626; --ok: #16a34a; --warn-bg: #fff7ed; --warn: #9a3412;
+    --badge-bg: #eef2ff; --badge: #3730a3; --input: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #181b21; --text: #e5e7eb; --muted: #9ca3af; --line: #2a2f38;
+      --accent: #3b82f6; --accent-text: #ffffff; --danger: #f87171; --ok: #4ade80; --warn-bg: #2a1d10; --warn: #fdba74;
+      --badge-bg: #1e2340; --badge: #c7d2fe; --input: #0f1115;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: var(--muted); font-size: 13px; }
+  header .spacer { flex: 1; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 40px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; }
+  .login { max-width: 360px; margin: 60px auto; }
+  .login h2 { margin: 0 0 4px; font-size: 20px; }
+  .login p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 12px 0 4px; }
+  input { width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 7px; background: var(--input); color: var(--text); font: inherit; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+  button:hover { filter: brightness(0.96); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  .login button.primary { width: 100%; margin-top: 18px; padding: 10px; }
+  .switch { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+  .switch a { color: var(--accent); }
+  .error { color: var(--danger); font-size: 14px; margin-top: 12px; min-height: 1em; }
+  .stats { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .stat { flex: 1 1 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
+  .stat .value { font-size: 24px; font-weight: 600; }
+  .stat .label { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .toolbar input { max-width: 320px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  .name { font-weight: 600; }
+  .login-cell { color: var(--muted); font-size: 13px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line); margin-right: 6px; }
+  .dot.on { background: var(--ok); }
+  .badge { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--badge-bg); color: var(--badge); margin-left: 6px; }
+  .badge.blocked { background: var(--warn-bg); color: var(--warn); }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .muted { color: var(--muted); }
+  .notice { background: var(--warn-bg); color: var(--warn); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); max-width: 420px; width: calc(100% - 32px); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .password { font: 600 22px/1.3 ui-monospace, Consolas, monospace; letter-spacing: .08em; padding: 10px; text-align: center; background: var(--bg); border-radius: 8px; margin: 12px 0; user-select: all; }
+  .hidden { display: none !important; }
+  /* Телефон: строки таблицы — карточками */
+  @media (max-width: 640px) {
+    header { flex-wrap: wrap; padding: 12px 16px; }
+    header #server-meta { order: 5; width: 100%; }
+    main { padding: 14px 12px 32px; }
+    .stat { flex-basis: 90px; padding: 10px 12px; }
+    .stat .value { font-size: 20px; }
+    .toolbar input { max-width: none; }
+    thead { display: none; }
+    table, tbody, tr, td { display: block; }
+    tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+    tr:last-child { border-bottom: 0; }
+    td { border: 0; padding: 3px 0; }
+    td[data-label]::before { content: attr(data-label) ": "; }
+    .actions { justify-content: flex-start; margin-top: 6px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>OfficeChat</h1>
+  <span class="meta" id="server-meta"></span>
+  <span class="spacer"></span>
+  <span class="meta" id="me"></span>
+  <button id="logout" class="hidden">Выйти</button>
+</header>
+
+<main>
+  <section id="login-view" class="card login hidden">
+    <h2>Администрирование</h2>
+    <p>Войдите тем же логином и паролем, что и в приложении. Нужны права администратора.</p>
+    <form id="login-form">
+      <label for="login">Логин</label>
+      <input id="login" autocomplete="username" required>
+      <label for="password">Пароль</label>
+      <input id="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Войти</button>
+      <div class="error" id="login-error"></div>
+    </form>
+    <p class="switch">Нет аккаунта? <a href="#" id="to-register">Зарегистрироваться</a></p>
+  </section>
+
+  <section id="register-view" class="card login hidden">
+    <h2>Регистрация</h2>
+    <p>Этим логином и паролем вы будете входить на всех своих устройствах.</p>
+    <form id="register-form">
+      <label for="reg-login">Логин</label>
+      <input id="reg-login" autocomplete="username" required minlength="3" maxlength="32">
+      <label for="reg-name">Имя (его видят коллеги)</label>
+      <input id="reg-name" autocomplete="name" required maxlength="64">
+      <label for="reg-password">Пароль</label>
+      <input id="reg-password" type="password" autocomplete="new-password" required minlength="6">
+      <label for="reg-password2">Пароль ещё раз</label>
+      <input id="reg-password2" type="password" autocomplete="new-password" required minlength="6">
+      <button class="primary" type="submit">Зарегистрироваться</button>
+      <div class="error" id="register-error"></div>
+    </form>
+    <p class="switch">Уже есть аккаунт? <a href="#" id="to-login">Войти</a></p>
+  </section>
+
+  <section id="admin-view" class="hidden">
+    <div id="not-admin" class="notice hidden">
+      У вашего аккаунта нет прав администратора. Их выдают на самом сервере командой
+      <code>officechat-server admin ЛОГИН</code> или другой администратор.
+    </div>
+    <div class="stats" id="stats">
+      <div class="stat"><div class="value" id="stat-total">—</div><div class="label">аккаунтов</div></div>
+      <div class="stat"><div class="value" id="stat-online">—</div><div class="label">сейчас в сети</div></div>
+      <div class="stat"><div class="value" id="stat-blocked">—</div><div class="label">заблокировано</div></div>
+    </div>
+    <div class="card" id="accounts-card">
+      <div class="toolbar">
+        <input id="filter" placeholder="Поиск по имени или логину" type="search">
+        <span class="spacer" style="flex:1"></span>
+        <button id="refresh">Обновить</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Сотрудник</th><th>Был в сети</th><th>Устройств</th><th></th></tr></thead>
+          <tbody id="accounts"></tbody>
+        </table>
+      </div>
+      <div class="error" id="admin-error"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="password-dialog">
+  <h3 style="margin-top:0">Временный пароль</h3>
+  <p id="password-for" class="muted"></p>
+  <div class="password" id="password-value"></div>
+  <p class="muted" style="font-size:14px">Передайте его сотруднику. При входе приложение попросит сменить пароль.
+    Все устройства этого аккаунта отключены.</p>
+  <form method="dialog" style="text-align:right"><button class="primary">Готово</button></form>
+</dialog>
+
+<script>
+"use strict";
+const TOKEN_KEY = "officechat.admin.token";
+let token = null;
+try { token = localStorage.getItem(TOKEN_KEY); } catch (e) { }
+let me = null;
+let accounts = [];
+
+const $ = id => document.getElementById(id);
+
+function saveToken(value) {
+  token = value;
+  try { value ? localStorage.setItem(TOKEN_KEY, value) : localStorage.removeItem(TOKEN_KEY); } catch (e) { }
+}
+
+async function api(method, path, body) {
+  const response = await fetch(path, {
+    method,
+    headers: Object.assign({ "Content-Type": "application/json" }, token ? { Authorization: "Bearer " + token } : {}),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (response.status === 401) { saveToken(null); show("login"); throw new Error("Вход больше не действует — войдите снова"); }
+  if (!response.ok) {
+    let message = "Ошибка " + response.status;
+    try { message = (await response.json()).message || message; } catch (e) { }
+    throw new Error(message);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+function show(view) {
+  $("login-view").classList.toggle("hidden", view !== "login");
+  $("register-view").classList.toggle("hidden", view !== "register");
+  if (view === "register") $("reg-login").focus();
+  $("admin-view").classList.toggle("hidden", view !== "admin");
+  $("logout").classList.toggle("hidden", view !== "admin");
+  if (view === "login") { $("me").textContent = ""; $("login").focus(); }
+}
+
+function when(value) {
+  if (!value) return "никогда";
+  const date = new Date(value);
+  const today = new Date();
+  const time = date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  return date.toDateString() === today.toDateString() ? "сегодня, " + time : date.toLocaleDateString("ru-RU") + ", " + time;
+}
+
+function cell(text, className) {
+  const td = document.createElement("td");
+  if (className) td.className = className;
+  if (text !== undefined) td.textContent = text;
+  return td;
+}
+
+function button(text, onClick, className) {
+  const b = document.createElement("button");
+  b.textContent = text;
+  if (className) b.className = className;
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+function render() {
+  const filter = $("filter").value.trim().toLowerCase();
+  const body = $("accounts");
+  body.replaceChildren();
+  $("stat-total").textContent = accounts.length;
+  $("stat-online").textContent = accounts.filter(a => a.online).length;
+  $("stat-blocked").textContent = accounts.filter(a => a.isBlocked).length;
+
+  for (const a of accounts) {
+    if (filter && !a.displayName.toLowerCase().includes(filter) && !a.login.toLowerCase().includes(filter)) continue;
+    const tr = document.createElement("tr");
+
+    const who = cell();
+    const dot = document.createElement("span");
+    dot.className = "dot" + (a.online ? " on" : "");
+    dot.title = a.online ? "в сети" : "не в сети";
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = a.displayName;
+    who.append(dot, name);
+    if (a.isAdmin) { const b = document.createElement("span"); b.className = "badge"; b.textContent = "администратор"; who.append(b); }
+    if (a.isBlocked) { const b = document.createElement("span"); b.className = "badge blocked"; b.textContent = "заблокирован"; who.append(b); }
+    const login = document.createElement("div");
+    login.className = "login-cell";
+    login.textContent = a.login + " · с " + new Date(a.createdAt).toLocaleDateString("ru-RU");
+    who.append(login);
+    tr.append(who);
+
+    const seen = cell(a.online ? "сейчас" : when(a.lastSeen), "muted");
+    seen.dataset.label = "Был в сети";
+    const devices = cell(String(a.devices), "muted");
+    devices.dataset.label = "Устройств";
+    tr.append(seen, devices);
+
+    const actions = cell();
+    const box = document.createElement("div");
+    box.className = "actions";
+    const self = me && a.id === me.id;
+    box.append(button("Сбросить пароль", () => resetPassword(a)));
+    if (!self) box.append(button(a.isBlocked ? "Разблокировать" : "Заблокировать", () => setBlocked(a, !a.isBlocked), a.isBlocked ? "" : "danger"));
+    if (!self) box.append(button(a.isAdmin ? "Снять права" : "Сделать администратором", () => setAdmin(a, !a.isAdmin)));
+    actions.append(box);
+    tr.append(actions);
+    body.append(tr);
+  }
+}
+
+async function load() {
+  $("admin-error").textContent = "";
+  try {
+    me = await api("GET", "/api/me");
+    $("me").textContent = me.displayName + " (" + me.login + ")";
+    show("admin");
+    $("not-admin").classList.toggle("hidden", me.isAdmin);
+    $("stats").classList.toggle("hidden", !me.isAdmin);
+    $("accounts-card").classList.toggle("hidden", !me.isAdmin);
+    if (!me.isAdmin) { accounts = []; render(); return; }
+    accounts = await api("GET", "/api/admin/accounts");
+    render();
+  } catch (e) {
+    $("admin-error").textContent = e.message;
+  }
+}
+
+async function resetPassword(a) {
+  if (!confirm("Сбросить пароль сотруднику «" + a.displayName + "»? Все его устройства будут отключены.")) return;
+  try {
+    const result = await api("POST", "/api/admin/accounts/" + a.id + "/reset-password");
+    $("password-for").textContent = a.displayName + " (" + a.login + ")";
+    $("password-value").textContent = result.temporaryPassword;
+    $("password-dialog").showModal();
+    await load();
+  } catch (e) { $("admin-error").textContent = e.message; }
+}
+
+async function setBlocked(a, blocked) {
+  if (blocked && !confirm("Заблокировать «" + a.displayName + "»? Он не сможет войти, его устройства отключатся.")) return;
+  try { await api("POST", "/api/admin/accounts/" + a.id + "/block", { blocked }); await load(); }
+  catch (e) { $("admin-error").textContent = e.message; }
+}
+
+async function setAdmin(a, isAdmin) {
+  if (!confirm((isAdmin ? "Выдать права администратора: " : "Снять права администратора: ") + a.displayName + "?")) return;
+  try { await api("POST", "/api/admin/accounts/" + a.id + "/admin", { isAdmin }); await load(); }
+  catch (e) { $("admin-error").textContent = e.message; }
+}
+
+$("login-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("login-error").textContent = "";
+  try {
+    const result = await api("POST", "/api/login", {
+      login: $("login").value.trim(),
+      password: $("password").value,
+      device: { name: "Браузер (администрирование)", platform: "web" },
+    });
+    saveToken(result.token);
+    $("password").value = "";
+    await load();
+  } catch (e) {
+    $("login-error").textContent = e.message;
+  }
+});
+
+$("to-register").addEventListener("click", e => { e.preventDefault(); show("register"); });
+$("to-login").addEventListener("click", e => { e.preventDefault(); show("login"); });
+
+$("register-form").addEventListener("submit", async event => {
+  event.preventDefault();
+  $("register-error").textContent = "";
+  if ($("reg-password").value !== $("reg-password2").value) {
+    $("register-error").textContent = "Пароли не совпадают";
+    return;
+  }
+  try {
+    const result = await api("POST", "/api/register", {
+      login: $("reg-login").value.trim(),
+      displayName: $("reg-name").value.trim(),
+      password: $("reg-password").value,
+      device: { name: "Браузер (администрирование)", platform: "web" },
+    });
+    saveToken(result.token);
+    $("reg-password").value = $("reg-password2").value = "";
+    await load();
+  } catch (e) {
+    $("register-error").textContent = e.message;
+  }
+});
+
+$("logout").addEventListener("click", async () => {
+  try { await api("POST", "/api/logout"); } catch (e) { }
+  saveToken(null);
+  show("login");
+});
+
+$("refresh").addEventListener("click", load);
+$("filter").addEventListener("input", render);
+
+fetch("/api/server").then(r => r.json()).then(info => {
+  $("server-meta").textContent = info.name + " · версия " + info.version;
+}).catch(() => { });
+
+if (token) load(); else show("login");
+</script>
+</body>
+</html>
