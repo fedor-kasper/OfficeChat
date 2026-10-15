@@ -1,0 +1,70 @@
+<m:Page xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:OfficeChat.Mobile"
+        x:Class="OfficeChat.Mobile.Views.LoginPage">
+    <ScrollViewer>
+        <StackPanel>
+            <Border Background="{StaticResource HeaderBrush}" Padding="24,40,24,24">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="OfficeChat" FontSize="28" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock x:Name="SubtitleText" Foreground="#DBEAFE" FontSize="15" TextWrapping="Wrap"
+                               Text="Войдите один раз — переписка будет на всех ваших устройствах" />
+                </StackPanel>
+            </Border>
+
+            <StackPanel Margin="20,16,20,24">
+                <!-- Сервер -->
+                <Border Background="{StaticResource SidebarBrush}" CornerRadius="10" Padding="14,12">
+                    <StackPanel Spacing="8">
+                        <DockPanel>
+                            <Ellipse x:Name="ServerDot" DockPanel.Dock="Left" Width="10" Height="10" Margin="0,0,10,0"
+                                     VerticalAlignment="Center" Fill="#9CA3AF" />
+                            <TextBlock x:Name="ServerText" Text="Ищем сервер в сети…" TextWrapping="Wrap"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+                        <Button x:Name="ChangeServerButton" Classes="plain" Padding="0" Click="ChangeServer_Click">
+                            <TextBlock Text="Другой адрес…" Foreground="{StaticResource AccentBrush}" />
+                        </Button>
+                        <StackPanel x:Name="AddressPanel" IsVisible="False" Spacing="8">
+                            <TextBox x:Name="AddressBox" Watermark="адрес сервера, например 192.168.1.10" />
+                            <Button Content="Подключиться" HorizontalAlignment="Stretch"
+                                    HorizontalContentAlignment="Center" Click="Connect_Click" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Grid x:Name="TabsGrid" ColumnDefinitions="*,*" Margin="0,18,0,2">
+                    <ToggleButton x:Name="SignInTab" Grid.Column="0" Content="Вход" IsChecked="True"
+                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,8"
+                                  CornerRadius="8,0,0,8" Click="SignInTab_Click" />
+                    <ToggleButton x:Name="RegisterTab" Grid.Column="1" Content="Регистрация"
+                                  HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Padding="0,8"
+                                  CornerRadius="0,8,8,0" Click="RegisterTab_Click" />
+                </Grid>
+
+                <TextBlock x:Name="ChangePasswordHint" IsVisible="False" Margin="0,16,0,0" TextWrapping="Wrap"
+                           Text="Вы вошли с временным паролем. Задайте свой — его будете вводить на других устройствах." />
+
+                <StackPanel x:Name="LoginPanel">
+                    <TextBlock Classes="label" Text="Логин" />
+                    <TextBox x:Name="LoginBox" MaxLength="32" />
+                </StackPanel>
+                <StackPanel x:Name="NamePanel" IsVisible="False">
+                    <TextBlock Classes="label" Text="Имя (его видят коллеги)" />
+                    <TextBox x:Name="NameBox" MaxLength="64" />
+                </StackPanel>
+                <TextBlock x:Name="PasswordLabel" Classes="label" Text="Пароль" />
+                <TextBox x:Name="PasswordBox" PasswordChar="•" />
+                <StackPanel x:Name="RepeatPanel" IsVisible="False">
+                    <TextBlock Classes="label" Text="Пароль ещё раз" />
+                    <TextBox x:Name="RepeatBox" PasswordChar="•" />
+                </StackPanel>
+
+                <Button x:Name="SubmitButton" Classes="primary" Content="Войти" Margin="0,22,0,0"
+                        IsDefault="True" Click="Submit_Click" />
+                <TextBlock x:Name="ErrorText" Foreground="#DC2626" TextWrapping="Wrap" Margin="0,12,0,0"
+                           IsVisible="False" />
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</m:Page>

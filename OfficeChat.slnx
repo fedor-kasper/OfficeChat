@@ -2,6 +2,8 @@
   <Project Path="OfficeChat.Core/OfficeChat.Core.csproj" />
   <Project Path="OfficeChat.Windows/OfficeChat.Windows.csproj" />
   <Project Path="OfficeChat.Linux/OfficeChat.Linux.csproj" />
+  <Project Path="OfficeChat.Mobile/OfficeChat.Mobile.csproj" />
+  <Project Path="OfficeChat.Mobile.Desktop/OfficeChat.Mobile.Desktop.csproj" />
   <Project Path="OfficeChat.Server/OfficeChat.Server.csproj" />
   <Project Path="OfficeChat.Server.Tests/OfficeChat.Server.Tests.csproj" />
 </Solution>

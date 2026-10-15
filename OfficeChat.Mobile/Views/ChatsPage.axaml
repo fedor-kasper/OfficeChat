@@ -1,0 +1,107 @@
+<m:Page xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:OfficeChat.Mobile"
+        x:Class="OfficeChat.Mobile.Views.ChatsPage">
+    <m:Page.Resources>
+        <m:AvatarBrushConverter x:Key="AvatarBrush" />
+        <m:InitialConverter x:Key="Initial" />
+    </m:Page.Resources>
+
+    <DockPanel>
+        <!-- Заголовок: кто я, связь с сервером, напоминания, меню -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}" Padding="16,12,6,12">
+            <DockPanel>
+                <Button x:Name="MenuButton" DockPanel.Dock="Right" Classes="header" Content="⋮" Click="Menu_Click" />
+                <Button x:Name="RemindersButton" DockPanel.Dock="Right" Classes="header" Click="Reminders_Click">
+                    <Panel>
+                        <TextBlock Text="⏰" />
+                        <Border x:Name="RemindersBadge" Background="#EF4444" CornerRadius="8" MinWidth="16" Height="16"
+                                Padding="4,0" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-10,0"
+                                IsVisible="False">
+                            <TextBlock x:Name="RemindersBadgeText" FontSize="10" FontWeight="Bold" Foreground="White"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                    </Panel>
+                </Button>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock x:Name="MyNameText" FontSize="20" FontWeight="SemiBold" Foreground="White"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="ServerStatusText" FontSize="12" Foreground="#DBEAFE" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <Panel>
+            <ScrollViewer>
+                <ItemsControl x:Name="ContactsList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Button IsVisible="{Binding IsConversation}" Classes="plain" Padding="16,10"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                    CornerRadius="0" Click="Contact_Click" ContextRequested="Contact_ContextRequested">
+                                <DockPanel>
+                                    <!-- Кружок с буквой; группа — квадратный; точка «в сети» -->
+                                    <Panel DockPanel.Dock="Left" Width="48" Height="48" Margin="0,0,12,0">
+                                        <Border CornerRadius="24"
+                                                Background="{Binding Key, Converter={StaticResource AvatarBrush}}">
+                                            <TextBlock Text="{Binding Title, Converter={StaticResource Initial}}"
+                                                       Foreground="White" FontSize="20" FontWeight="SemiBold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                        </Border>
+                                        <TextBlock Text="👥" FontSize="14" IsVisible="{Binding IsGroup}"
+                                                   HorizontalAlignment="Right" VerticalAlignment="Bottom" />
+                                        <Border Width="14" Height="14" CornerRadius="7" Background="{StaticResource OnlineBrush}"
+                                                BorderBrush="White" BorderThickness="2" HorizontalAlignment="Right"
+                                                VerticalAlignment="Bottom">
+                                            <Border.IsVisible>
+                                                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                    <Binding Path="IsOnline" />
+                                                    <Binding Path="IsPerson" />
+                                                </MultiBinding>
+                                            </Border.IsVisible>
+                                        </Border>
+                                    </Panel>
+
+                                    <!-- Справа: время и счётчик -->
+                                    <StackPanel DockPanel.Dock="Right" Margin="8,0,0,0" Spacing="4" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding LastTimeText}" FontSize="12" HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="4">
+                                            <TextBlock Text="🔕" FontSize="12" IsVisible="{Binding IsMuted}" />
+                                            <TextBlock Text="📌" FontSize="12" IsVisible="{Binding IsPinned}" />
+                                            <Border Background="{StaticResource AccentBrush}" CornerRadius="10" MinWidth="20"
+                                                    Height="20" Padding="6,0" IsVisible="{Binding HasUnread}">
+                                                <TextBlock Text="{Binding UnreadCount}" FontSize="12" FontWeight="SemiBold"
+                                                           Foreground="White" HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                        </StackPanel>
+                                    </StackPanel>
+
+                                    <StackPanel VerticalAlignment="Center" Spacing="3">
+                                        <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold"
+                                                   TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding LastPreview}" FontSize="14" MaxLines="1"
+                                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}"
+                                                   IsVisible="{Binding !IsTyping}" />
+                                        <TextBlock Text="{Binding TypingText}" FontSize="14" FontStyle="Italic"
+                                                   Foreground="{StaticResource AccentBrush}" IsVisible="{Binding IsTyping}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Button>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <TextBlock x:Name="EmptyText" IsVisible="False" Margin="32" TextWrapping="Wrap" TextAlignment="Center"
+                       VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
+                       Text="Здесь появятся коллеги и группы, как только телефон свяжется с сервером." />
+
+            <!-- Новая группа -->
+            <Button Classes="primary" Width="56" Height="56" CornerRadius="28" Padding="0" Margin="20"
+                    HorizontalAlignment="Right" VerticalAlignment="Bottom" FontSize="26" Content="+"
+                    ToolTip.Tip="Новая группа" Click="NewGroup_Click" />
+        </Panel>
+    </DockPanel>
+</m:Page>

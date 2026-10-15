@@ -1,0 +1,150 @@
+<m:Page xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:OfficeChat.Mobile"
+        xmlns:v="clr-namespace:OfficeChat.Views"
+        x:Class="OfficeChat.Mobile.Views.ConversationPage">
+    <m:Page.Resources>
+        <m:AvatarBrushConverter x:Key="AvatarBrush" />
+        <m:InitialConverter x:Key="Initial" />
+        <v:ImageThumbnailConverter x:Key="Thumbnail" />
+
+        <!-- Содержимое пузыря: автор (в группе), цитата, изображение, файл, текст, время и статус -->
+        <DataTemplate x:Key="MessageBody">
+            <StackPanel Spacing="4">
+                <TextBlock Text="{Binding SenderName}" IsVisible="{Binding ShowSender}" FontSize="12" FontWeight="SemiBold"
+                           Foreground="{Binding SenderId, Converter={StaticResource AvatarBrush}}" />
+                <Border IsVisible="{Binding HasReply}" BorderBrush="{StaticResource AccentBrush}" BorderThickness="3,0,0,0"
+                        Padding="8,2" Background="#0F2563EB" CornerRadius="0,6,6,0">
+                    <StackPanel>
+                        <TextBlock Text="{Binding ReplyAuthor}" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource AccentBrush}" />
+                        <TextBlock Text="{Binding ReplyText}" FontSize="13" MaxLines="2" TextWrapping="Wrap"
+                                   TextTrimming="CharacterEllipsis" Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+                <Button IsVisible="{Binding IsImage}" Classes="plain" Padding="0" Click="Image_Click">
+                    <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}" MaxWidth="260" MaxHeight="300"
+                           Stretch="Uniform" />
+                </Button>
+                <Button IsVisible="{Binding IsFile}" Classes="plain" Padding="0" Click="File_Click"
+                        HorizontalContentAlignment="Left">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="{Binding FileIcon}" FontSize="26" VerticalAlignment="Center" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="{Binding FileName}" FontWeight="SemiBold" TextWrapping="Wrap" MaxWidth="220" />
+                            <TextBlock Text="{Binding FileSizeText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Button>
+                <SelectableTextBlock Text="{Binding Text}" IsVisible="{Binding HasText}" TextWrapping="Wrap" FontSize="15" />
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6">
+                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBlock Text="{Binding TimeLabel}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
+    </m:Page.Resources>
+    <m:Page.Styles>
+        <Style Selector="Border.bubble">
+            <Setter Property="CornerRadius" Value="14" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="MaxWidth" Value="320" />
+        </Style>
+    </m:Page.Styles>
+
+    <DockPanel>
+        <!-- Заголовок -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource HeaderBrush}" Padding="2,8,4,8">
+            <DockPanel>
+                <Button DockPanel.Dock="Left" Classes="header" Content="←" Click="Back_Click" />
+                <Button x:Name="MenuButton" DockPanel.Dock="Right" Classes="header" Content="⋮" Click="Menu_Click" />
+                <Button x:Name="GameButton" DockPanel.Dock="Right" Classes="header" Content="🎮" Click="Game_Click" />
+                <Border DockPanel.Dock="Left" Width="38" Height="38" CornerRadius="19" Margin="2,0,10,0"
+                        Background="{Binding Key, Converter={StaticResource AvatarBrush}}">
+                    <TextBlock Text="{Binding Title, Converter={StaticResource Initial}}" Foreground="White" FontSize="17"
+                               FontWeight="SemiBold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontSize="17" FontWeight="SemiBold" Foreground="White"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="StatusText" FontSize="12" Foreground="#DBEAFE" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Ввод -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0"
+                Background="White" Padding="6">
+            <StackPanel Spacing="6">
+                <Border x:Name="ComposeBanner" IsVisible="False" Background="{StaticResource SidebarBrush}"
+                        CornerRadius="8" Padding="10,6">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Classes="plain" Content="✕" Padding="8,2" Click="CancelCompose_Click" />
+                        <Border DockPanel.Dock="Left" Width="3" Background="{StaticResource AccentBrush}" Margin="0,0,8,0" />
+                        <StackPanel>
+                            <TextBlock x:Name="ComposeTitle" FontSize="12" FontWeight="SemiBold"
+                                       Foreground="{StaticResource AccentBrush}" />
+                            <TextBlock x:Name="ComposeText" FontSize="13" MaxLines="1" TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+                <DockPanel>
+                    <Button x:Name="AttachButton" DockPanel.Dock="Left" Classes="plain" Content="📎" FontSize="20"
+                            VerticalAlignment="Bottom" Click="Attach_Click" />
+                    <Button x:Name="StickersButton" DockPanel.Dock="Left" Classes="plain" Content="😊" FontSize="20"
+                            VerticalAlignment="Bottom" Click="Stickers_Click" />
+                    <Button x:Name="SendButton" DockPanel.Dock="Right" Classes="primary" Width="46" Height="46"
+                            CornerRadius="23" Padding="0" Content="➤" FontSize="18" VerticalAlignment="Bottom"
+                            Margin="6,0,0,0" Click="Send_Click" />
+                    <TextBox x:Name="InputBox" Watermark="Сообщение" AcceptsReturn="True" TextWrapping="Wrap"
+                             MaxHeight="140" MaxLength="4000" VerticalContentAlignment="Center" />
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- Сообщения -->
+        <ScrollViewer x:Name="MessagesScroll" Background="White">
+            <StackPanel Margin="8,8,8,12">
+                <Button x:Name="LoadOlderButton" Content="Показать раньше" HorizontalAlignment="Center" Margin="0,0,0,8"
+                        IsVisible="{Binding HasOlderMessages}" Click="LoadOlder_Click" />
+                <ItemsControl x:Name="MessagesList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Panel Margin="0,3" Background="Transparent" ContextRequested="Message_ContextRequested">
+                                <!-- Служебная запись: по центру -->
+                                <Border IsVisible="{Binding IsSystem}" HorizontalAlignment="Center" CornerRadius="10"
+                                        Padding="10,4" Background="{StaticResource SidebarBrush}" MaxWidth="320">
+                                    <TextBlock Text="{Binding Text}" FontSize="12" TextWrapping="Wrap" TextAlignment="Center"
+                                               Foreground="{StaticResource MutedTextBrush}" />
+                                </Border>
+
+                                <!-- Своё -->
+                                <Border Classes="bubble" HorizontalAlignment="Right"
+                                        Background="{StaticResource OutgoingBrush}">
+                                    <Border.IsVisible>
+                                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                            <Binding Path="IsOutgoing" />
+                                            <Binding Path="!IsSystem" />
+                                        </MultiBinding>
+                                    </Border.IsVisible>
+                                    <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource MessageBody}" />
+                                </Border>
+
+                                <!-- Чужое -->
+                                <Border Classes="bubble" HorizontalAlignment="Left" Background="{StaticResource IncomingBrush}">
+                                    <Border.IsVisible>
+                                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                            <Binding Path="!IsOutgoing" />
+                                            <Binding Path="!IsSystem" />
+                                        </MultiBinding>
+                                    </Border.IsVisible>
+                                    <ContentControl Content="{Binding}" ContentTemplate="{DynamicResource MessageBody}" />
+                                </Border>
+                            </Panel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</m:Page>

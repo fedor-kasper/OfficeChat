@@ -102,6 +102,17 @@ public sealed class Contact : INotifyPropertyChanged
     /// <summary>Время последнего сообщения — по нему список упорядочен (новые вверху).</summary>
     public DateTime LastActivity => Messages.Count > 0 ? Messages[^1].Timestamp : DateTime.MinValue;
 
+    /// <summary>Последнее сообщение одной строкой — для списка переписок на телефоне.</summary>
+    public string LastPreview => Messages.Count == 0 ? ""
+        : Messages[^1] is var last && last.IsSystem ? last.Text
+        : (last.IsOutgoing ? "Вы: " : IsGroup && last.SenderName.Length > 0 ? last.SenderName + ": " : "") + last.PreviewText;
+
+    /// <summary>Когда было последнее сообщение: сегодня — время, раньше — дата.</summary>
+    public string LastTimeText => Messages.Count == 0 ? ""
+        : LastActivity.Date == DateTime.Today ? LastActivity.ToString("HH:mm")
+        : LastActivity.Year == DateTime.Today.Year ? LastActivity.ToString("dd.MM")
+        : LastActivity.ToString("dd.MM.yy");
+
     /// <summary>«печатает…» (в группе — с именем); пусто, если никто не печатает.</summary>
     public string TypingText
     {
@@ -140,7 +151,12 @@ public sealed class Contact : INotifyPropertyChanged
     {
         Peer = peer;
         Group = group;
-        Messages.CollectionChanged += (_, _) => OnPropertyChanged(nameof(LastActivity));
+        Messages.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(LastActivity));
+            OnPropertyChanged(nameof(LastPreview));
+            OnPropertyChanged(nameof(LastTimeText));
+        };
         if (group != null)
             group.PropertyChanged += (_, _) =>
             {

@@ -73,8 +73,11 @@ public static class AccountLauncher
         return account;
     }
 
+    /// <summary>Своё название устройства (телефон: модель вместо имени компьютера).</summary>
+    public static DeviceInfo? DeviceOverride { get; set; }
+
     /// <summary>Как устройство называется на сервере (видно в списке устройств).</summary>
-    public static DeviceInfo ThisDevice() => new(
+    public static DeviceInfo ThisDevice() => DeviceOverride ?? new(
         Environment.MachineName + (Environment.UserName is { Length: > 0 } user ? $" ({user})" : ""),
         OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsLinux() ? "linux" : "other");
 

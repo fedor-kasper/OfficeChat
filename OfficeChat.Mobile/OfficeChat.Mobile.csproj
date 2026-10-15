@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Интерфейс OfficeChat для телефона (Avalonia, один экран с переходами). Работает внутри Android-оболочки
+    (OfficeChat.Android), а для проверки — в окне на компьютере (OfficeChat.Mobile.Desktop).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OfficeChat.Mobile</RootNamespace>
+    <AvaloniaUseCompiledBindingsByDefault>false</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeChat.Core\OfficeChat.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+  </ItemGroup>
+
+  <!-- Общее с Linux-версией (тоже Avalonia): миниатюры, стикеры, доски игр -->
+  <ItemGroup>
+    <Compile Include="..\OfficeChat.Linux\Views\ColorBrushConverter.cs" Link="Shared\ColorBrushConverter.cs" />
+    <Compile Include="..\OfficeChat.Linux\Views\ImageThumbnailConverter.cs" Link="Shared\ImageThumbnailConverter.cs" />
+    <Compile Include="..\OfficeChat.Linux\Views\StickerPicker.cs" Link="Shared\StickerPicker.cs" />
+    <Compile Include="..\OfficeChat.Linux\Views\GameBoards.cs" Link="Shared\GameBoards.cs" />
+    <Compile Include="..\OfficeChat.Linux\Views\GamePanel.axaml.cs" Link="Shared\GamePanel.axaml.cs" />
+    <AvaloniaXaml Include="..\OfficeChat.Linux\Views\GamePanel.axaml" Link="Shared\GamePanel.axaml" />
+  </ItemGroup>
+
+</Project>
