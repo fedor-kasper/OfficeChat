@@ -33,7 +33,7 @@ public static class StickerStore
         ("food", "Праздник и еда"),
     };
 
-    public static string Folder { get; } = Path.Combine(SettingsService.DataFolder, "stickers");
+    public static string Folder => Path.Combine(SettingsService.DataFolder, "stickers");
 
     private static string MyPackFolder => Path.Combine(Folder, MyPackTitle);
 

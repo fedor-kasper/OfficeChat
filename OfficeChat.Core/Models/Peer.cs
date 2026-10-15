@@ -10,7 +10,8 @@ public sealed class Peer : INotifyPropertyChanged
     private string _name = "";
     private string _machine = "";
     private IPAddress _address = IPAddress.None;
-    private bool _isOnline;
+    private bool _lanOnline;
+    private bool _serverOnline;
     private int _port = DefaultMessagingPort;
 
     /// <summary>Порт сообщений по умолчанию (совпадает с MessagingService.MessagingPort).</summary>
@@ -46,11 +47,32 @@ public sealed class Peer : INotifyPropertyChanged
         set => Set(ref _port, value);
     }
 
-    public bool IsOnline
+    /// <summary>Виден в локальной сети напрямую (по рассылке обнаружения).</summary>
+    public bool LanOnline
     {
-        get => _isOnline;
-        set => Set(ref _isOnline, value);
+        get => _lanOnline;
+        set
+        {
+            var was = IsOnline;
+            Set(ref _lanOnline, value);
+            if (IsOnline != was) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOnline)));
+        }
     }
+
+    /// <summary>В сети по данным сервера (аккаунт подключён с какого-нибудь устройства).</summary>
+    public bool ServerOnline
+    {
+        get => _serverOnline;
+        set
+        {
+            var was = IsOnline;
+            Set(ref _serverOnline, value);
+            if (IsOnline != was) PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsOnline)));
+        }
+    }
+
+    /// <summary>В сети — напрямую или через сервер.</summary>
+    public bool IsOnline => _lanOnline || _serverOnline;
 
     public DateTime LastSeen { get; set; }
 

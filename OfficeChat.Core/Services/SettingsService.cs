@@ -24,12 +24,29 @@ public sealed class AppSettings
     public List<string> RecentStickers { get; set; } = new();
 }
 
-/// <summary>Хранит настройки в %AppData%\OfficeChat\settings.json.</summary>
+/// <summary>
+/// Хранит настройки в папке данных: без аккаунта — %AppData%\OfficeChat\settings.json (как раньше),
+/// с аккаунтом — в его собственной папке %AppData%\OfficeChat\accounts\Id (история, файлы, настройки).
+/// </summary>
 public static class SettingsService
 {
-    public static string DataFolder { get; } =
+    /// <summary>Общая папка программы: журнал работы, список аккаунтов, данные без аккаунта.</summary>
+    public static string RootFolder { get; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData,
             Environment.SpecialFolderOption.Create), "OfficeChat");
+
+    /// <summary>Папка данных текущего аккаунта (без аккаунта — общая папка).</summary>
+    public static string DataFolder { get; private set; } = RootFolder;
+
+    /// <summary>
+    /// Работать с данными в другой папке (папка аккаунта). Вызывать при запуске — до того,
+    /// как что-либо прочитано или записано.
+    /// </summary>
+    public static void UseDataFolder(string folder)
+    {
+        Directory.CreateDirectory(folder);
+        DataFolder = folder;
+    }
 
     private static string SettingsPath => Path.Combine(DataFolder, "settings.json");
 

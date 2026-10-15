@@ -13,6 +13,8 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- Ключ входа в аккаунт на Windows храним зашифрованным средствами Windows (DPAPI) -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
 
   <!-- Встроенные наборы стикеров (Microsoft Fluent Emoji, MIT — см. Assets/Stickers/LICENSE.txt) -->

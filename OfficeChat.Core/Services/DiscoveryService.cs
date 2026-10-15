@@ -172,8 +172,8 @@ public sealed class DiscoveryService : IDisposable
             peer.Port = port > 0 ? port : Peer.DefaultMessagingPort;
         peer.LastSeen = DateTime.UtcNow;
 
-        if (peer.IsOnline) return false;
-        peer.IsOnline = true;
+        if (peer.LanOnline) return false;
+        peer.LanOnline = true;
         Log.Info($"В сети: «{peer.Name}» ({peer.Machine}, {from}:{peer.Port})");
         PeerOnline?.Invoke(peer);
         return true;
@@ -191,7 +191,7 @@ public sealed class DiscoveryService : IDisposable
     /// <summary>Забывает компьютер, который не в сети (ручное удаление из списка).</summary>
     public void Forget(Guid id)
     {
-        if (_peers.TryGetValue(id, out var peer) && !peer.IsOnline)
+        if (_peers.TryGetValue(id, out var peer) && !peer.LanOnline)
             _peers.Remove(id);
     }
 
@@ -200,8 +200,8 @@ public sealed class DiscoveryService : IDisposable
 
     private void MarkOffline(Peer peer)
     {
-        if (!peer.IsOnline) return;
-        peer.IsOnline = false;
+        if (!peer.LanOnline) return;
+        peer.LanOnline = false;
         Log.Info($"Не в сети: «{peer.Name}» ({peer.Machine})");
         PeerOffline?.Invoke(peer);
     }
@@ -211,7 +211,7 @@ public sealed class DiscoveryService : IDisposable
         _uiContext.Post(_ =>
         {
             var deadline = DateTime.UtcNow - PeerTimeout;
-            foreach (var stale in _peers.Values.Where(p => p.IsOnline && p.LastSeen < deadline).ToList())
+            foreach (var stale in _peers.Values.Where(p => p.LanOnline && p.LastSeen < deadline).ToList())
                 MarkOffline(stale);
         }, null);
     }

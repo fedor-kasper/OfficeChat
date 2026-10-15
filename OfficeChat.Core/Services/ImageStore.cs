@@ -14,7 +14,7 @@ public static class ImageStore
 
     public static readonly string[] Extensions = { ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".tif", ".tiff", ".webp" };
 
-    public static string Folder { get; } = Path.Combine(SettingsService.DataFolder, "images");
+    public static string Folder => Path.Combine(SettingsService.DataFolder, "images");
 
     public static bool IsImageFile(string path) =>
         Extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);

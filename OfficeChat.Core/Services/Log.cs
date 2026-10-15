@@ -67,7 +67,7 @@ public static class Log
     {
         try
         {
-            return Path.Combine(SettingsService.DataFolder, "logs");
+            return Path.Combine(SettingsService.RootFolder, "logs");
         }
         catch
         {

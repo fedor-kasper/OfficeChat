@@ -15,7 +15,7 @@ public static class FileStore
     /// <summary>Сколько места оставлять свободным на диске при приёме.</summary>
     private const long ReserveBytes = 200L * 1024 * 1024;
 
-    public static string Folder { get; } = Path.Combine(SettingsService.DataFolder, "files");
+    public static string Folder => Path.Combine(SettingsService.DataFolder, "files");
 
     private static string IncomingFolder => Path.Combine(Folder, "incoming");
 
