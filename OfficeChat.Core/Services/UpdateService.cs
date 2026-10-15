@@ -247,7 +247,7 @@ public sealed class UpdateService : IDisposable
                     WaitArgument + Environment.ProcessId,
                     UpdatedArgument,
                 },
-            });
+            }.WithArguments(RestartArguments));
             _exit();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
@@ -265,6 +265,9 @@ public sealed class UpdateService : IDisposable
 
     /// <summary>Аргумент запуска «сразу в трей» (как при автозапуске).</summary>
     private const string AutoStartArgument = "--tray";
+
+    /// <summary>Что ещё передать перезапущенной копии (например, с каким аккаунтом она работала).</summary>
+    public static string[] RestartArguments { get; set; } = [];
 
     /// <summary>
     /// Запуск после обновления: дождаться выхода старой копии (иначе она ещё держит «единственный экземпляр»)
@@ -361,5 +364,14 @@ public sealed class UpdateService : IDisposable
     {
         _timer.Stop();
         _chat.UpdatePacketReceived -= OnPacket;
+    }
+}
+
+internal static class ProcessStartInfoExtensions
+{
+    public static ProcessStartInfo WithArguments(this ProcessStartInfo start, IEnumerable<string> args)
+    {
+        foreach (var arg in args) start.ArgumentList.Add(arg);
+        return start;
     }
 }

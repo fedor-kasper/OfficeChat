@@ -1,0 +1,102 @@
+<Window x:Class="OfficeChat.Views.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OfficeChat — вход"
+        Width="420" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,10,0,4" />
+        </Style>
+        <Style x:Key="Field" TargetType="Control">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Padding" Value="6,4" />
+        </Style>
+        <Style x:Key="LinkButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <ContentPresenter Margin="{TemplateBinding Padding}" />
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <StackPanel>
+        <Border Background="{StaticResource HeaderBrush}" Padding="20,16">
+            <StackPanel>
+                <TextBlock Text="OfficeChat" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+                <TextBlock x:Name="SubtitleText" Foreground="#DBEAFE" TextWrapping="Wrap" Margin="0,2,0,0"
+                           Text="Войдите один раз — переписка будет на всех ваших устройствах" />
+            </StackPanel>
+        </Border>
+
+        <StackPanel Margin="20,14,20,18">
+            <!-- Сервер: найден в сети / ищем / не найден (ввести адрес) -->
+            <Border Background="{StaticResource SidebarBrush}" CornerRadius="8" Padding="12,9">
+                <StackPanel>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Padding="4,0"
+                                Click="ChangeServer_Click">
+                            <TextBlock Text="Другой адрес…" Foreground="{StaticResource AccentBrush}" />
+                        </Button>
+                        <Ellipse x:Name="ServerDot" DockPanel.Dock="Left" Width="8" Height="8" Margin="0,0,8,0"
+                                 VerticalAlignment="Center" Fill="#9CA3AF" />
+                        <TextBlock x:Name="ServerText" Text="Ищем сервер в сети…" VerticalAlignment="Center"
+                                   TextWrapping="Wrap" />
+                    </DockPanel>
+                    <DockPanel x:Name="AddressPanel" Visibility="Collapsed" Margin="0,8,0,0">
+                        <Button DockPanel.Dock="Right" Content="Подключиться" Margin="6,0,0,0" Click="Connect_Click" />
+                        <TextBox x:Name="AddressBox" Style="{StaticResource Field}"
+                                 ToolTip="Адрес сервера, например 192.168.1.10" />
+                    </DockPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- Вход / регистрация / новый пароль -->
+            <Grid x:Name="TabsGrid" Margin="0,14,0,2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Button x:Name="SignInTab" Grid.Column="0" Content="Вход" Padding="0,6" Click="SignInTab_Click" />
+                <Button x:Name="RegisterTab" Grid.Column="1" Content="Регистрация" Padding="0,6" Margin="6,0,0,0"
+                        Click="RegisterTab_Click" />
+            </Grid>
+
+            <TextBlock x:Name="ChangePasswordHint" Visibility="Collapsed" Margin="0,14,0,0" TextWrapping="Wrap"
+                       Text="Вы вошли с временным паролем. Задайте свой — его будете вводить на других устройствах." />
+
+            <StackPanel x:Name="LoginPanel">
+                <TextBlock Style="{StaticResource Label}" Text="Логин" />
+                <TextBox x:Name="LoginBox" Style="{StaticResource Field}" MaxLength="32" />
+            </StackPanel>
+            <StackPanel x:Name="NamePanel" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource Label}" Text="Имя (его видят коллеги)" />
+                <TextBox x:Name="NameBox" Style="{StaticResource Field}" MaxLength="64" />
+            </StackPanel>
+            <TextBlock x:Name="PasswordLabel" Style="{StaticResource Label}" Text="Пароль" />
+            <PasswordBox x:Name="PasswordBox" Style="{StaticResource Field}" />
+            <StackPanel x:Name="RepeatPanel" Visibility="Collapsed">
+                <TextBlock Style="{StaticResource Label}" Text="Пароль ещё раз" />
+                <PasswordBox x:Name="RepeatBox" Style="{StaticResource Field}" />
+            </StackPanel>
+
+            <Button x:Name="SubmitButton" Content="Войти" Margin="0,18,0,0" Padding="0,8" FontWeight="SemiBold"
+                    IsDefault="True" Click="Submit_Click" />
+            <TextBlock x:Name="ErrorText" Foreground="#DC2626" TextWrapping="Wrap" Margin="0,10,0,0"
+                       Visibility="Collapsed" />
+
+            <Button x:Name="NoAccountButton" Style="{StaticResource LinkButton}" Margin="0,14,0,0"
+                    HorizontalAlignment="Center" Click="NoAccount_Click">
+                <TextBlock Text="Работать без аккаунта (как раньше)" Foreground="{StaticResource MutedTextBrush}" />
+            </Button>
+        </StackPanel>
+    </StackPanel>
+</Window>

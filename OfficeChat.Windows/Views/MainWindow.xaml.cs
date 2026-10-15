@@ -4,7 +4,10 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
+using System.Windows.Media;
+using OfficeChat.Client;
 using OfficeChat.Models;
 using OfficeChat.Services;
 
@@ -32,11 +35,15 @@ public partial class MainWindow : Window
     private bool _settingInput;
     private bool _trayHintShown;
 
-    public MainWindow(AppSettings settings)
+    // Аккаунт, с которым работаем (null — без аккаунта, как раньше).
+    private readonly SavedAccount? _account;
+
+    public MainWindow(AppSettings settings, ServerSession? session = null, SavedAccount? account = null)
     {
         InitializeComponent();
         Icon = AppIcon.CreateImageSource();
         _settings = settings;
+        _account = account;
         MyNameText.Text = settings.DisplayName;
 
         _chat = new ChatService(settings)
@@ -44,6 +51,13 @@ public partial class MainWindow : Window
             IsConversationVisible = contact =>
                 contact == _current && IsVisible && IsActive && WindowState != WindowState.Minimized,
         };
+        if (session != null)
+        {
+            _chat.UseServer(session);
+            _chat.ServerStateChanged += UpdateServerStatus;
+            _chat.SessionExpired += OnSessionExpired;
+            UpdateServerStatus();
+        }
         _chat.PresenceChanged += OnPresenceChanged;
         _chat.MessageReceived += OnMessageReceived;
         ContactsList.ItemsSource = _chat.Contacts;
@@ -888,18 +902,132 @@ public partial class MainWindow : Window
 
     // ---- Прочее ----
 
-    private void Settings_Click(object sender, RoutedEventArgs e)
+    private void Menu_Click(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu { PlacementTarget = MenuButton, Placement = PlacementMode.Bottom };
+        var settings = new MenuItem { Header = "Имя и автозапуск…" };
+        settings.Click += Settings_Click;
+        menu.Items.Add(settings);
+        if (_account != null)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(new MenuItem { Header = $"Аккаунт: {_account.Login} · {_account.ServerName}", IsEnabled = false });
+            var password = new MenuItem { Header = "Сменить пароль…" };
+            password.Click += async (_, _) => await ChangePasswordAsync();
+            menu.Items.Add(password);
+            foreach (var other in AccountStore.All().Where(a => a.Id != _account.Id))
+            {
+                var open = new MenuItem { Header = $"Открыть: {other.DisplayName} ({other.Login})" };
+                open.Click += (_, _) => AccountLauncher.StartCopy(AccountLauncher.AccountArgument, other.Id.ToString());
+                menu.Items.Add(open);
+            }
+            var add = new MenuItem { Header = "Добавить аккаунт…" };
+            add.Click += (_, _) => AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+            menu.Items.Add(add);
+            var signOut = new MenuItem { Header = "Выйти из аккаунта…" };
+            signOut.Click += async (_, _) => await SignOutAsync();
+            menu.Items.Add(signOut);
+        }
+        else
+        {
+            menu.Items.Add(new Separator());
+            var signIn = new MenuItem { Header = "Войти в аккаунт…" };
+            signIn.Click += (_, _) =>
+            {
+                // Окно входа — в новой копии; эта (без аккаунта) закрывается, чтобы не было двух «я» в сети.
+                App.ReleaseInstance();
+                AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+                ExitApplication();
+            };
+            menu.Items.Add(signIn);
+        }
+        menu.IsOpen = true;
+    }
+
+    private async void Settings_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new SettingsWindow(_settings.DisplayName, _settings.AutoStart) { Owner = this };
         dialog.ShowVersion(_updates.CurrentVersion, _updates.CanShare);
         if (dialog.ShowDialog() != true) return;
 
-        _settings.DisplayName = dialog.EnteredName;
+        var name = dialog.EnteredName;
+        if (_account != null && _chat.Session != null && name != _settings.DisplayName)
+        {
+            // Имя аккаунта — на сервере: его видят коллеги на всех устройствах.
+            try
+            {
+                await _chat.Session.Api.ChangeProfileAsync(name);
+                _account.DisplayName = name;
+                AccountStore.Save(_account, makeLastUsed: false);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, "Не удалось сменить имя: " + LoginFlow.Describe(ex), "OfficeChat");
+                name = _settings.DisplayName;
+            }
+        }
+        _settings.DisplayName = name;
         _settings.AutoStart = dialog.AutoStart;
         SettingsService.Save(_settings);
         AutoStartService.Apply(_settings.AutoStart);
         MyNameText.Text = _settings.DisplayName;
         _chat.AnnounceNow();
+    }
+
+    private void UpdateServerStatus()
+    {
+        ServerStatusText.Visibility = Visibility.Visible;
+        var connected = _chat.IsServerConnected;
+        ServerStatusText.Text = connected ? "● на связи с сервером" : "○ нет связи с сервером — работаем напрямую";
+        ServerStatusText.Foreground = new SolidColorBrush(connected ? Color.FromRgb(0x16, 0xA3, 0x4A) : Color.FromRgb(0xB4, 0x53, 0x09));
+        ServerStatusText.ToolTip = connected
+            ? $"Сервер {_account?.ServerName} ({_account?.ServerHost}): переписка синхронизируется на все ваши устройства"
+            : "Сообщения уходят компьютерам напрямую; на сервер всё отправится, когда связь появится";
+    }
+
+    private async Task ChangePasswordAsync()
+    {
+        if (_chat.Session == null) return;
+        var dialog = new ChangePasswordWindow { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        try
+        {
+            await _chat.Session.Api.ChangePasswordAsync(dialog.OldPassword, dialog.NewPassword);
+            MessageBox.Show(this, "Пароль изменён. На других устройствах вводить его не нужно — они остаются в аккаунте.",
+                "OfficeChat");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "Пароль не изменён: " + LoginFlow.Describe(ex), "OfficeChat");
+        }
+    }
+
+    private async Task SignOutAsync()
+    {
+        if (_account == null) return;
+        if (MessageBox.Show(this, $"Выйти из аккаунта «{_account.Login}» на этом компьютере?\n\n" +
+                                  "Переписка останется на сервере и на других ваших устройствах.",
+                "OfficeChat", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            return;
+        await AccountLauncher.SignOutAsync(_account, _chat.Session);
+        App.ReleaseInstance();
+        AccountLauncher.StartCopy(AccountLauncher.LoginArgument);
+        ExitApplication();
+    }
+
+    /// <summary>Сервер больше не принимает вход (вышли на другом устройстве, сбросили пароль, заблокировали).</summary>
+    private void OnSessionExpired(string reason)
+    {
+        if (_account == null) return;
+        UpdateServerStatus();
+        MessageBox.Show(this, $"{reason}.\n\nПока работаем без сервера — напрямую с коллегами в сети.", "OfficeChat");
+        var login = new LoginWindow(_account, allowNoAccount: false) { Owner = IsVisible ? this : null };
+        login.ShowDialog();
+        if (login.Account == null) return;
+        // Новый ключ — начинаем заново с этим аккаунтом.
+        App.ReleaseInstance();
+        AccountLauncher.StartCopy(AccountLauncher.AccountArgument, login.Account.Id.ToString());
+        ExitApplication();
     }
 
     // ---- История и управление контактами ----

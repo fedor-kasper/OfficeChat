@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Threading;
+using OfficeChat.Client;
 using OfficeChat.Services;
 using OfficeChat.Views;
 
@@ -11,9 +12,10 @@ public partial class App : Application
     private const string InstanceMutexName = @"Local\OfficeChat.SingleInstance";
     private const string ShowWindowEventName = @"Local\OfficeChat.ShowWindow";
 
-    // Не даём запустить вторую копию в одном сеансе.
-    private static Mutex? _singleInstance;
+    // Не даём запустить вторую копию (того же аккаунта) в одном сеансе.
+    private Mutex? _singleInstance;
     private EventWaitHandle? _showWindowSignal;
+    private RegisteredWaitHandle? _showWindowWait;
     private Views.MainWindow? _mainWindow;
     private bool _fatalShown;
 
@@ -47,49 +49,153 @@ public partial class App : Application
     {
         // Перезапуск после обновления: ждём, пока закроется старая копия.
         UpdateService.FinishRestart(e.Args);
-        _singleInstance = new Mutex(true, InstanceMutexName, out var isFirst);
-        _showWindowSignal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName);
-        if (!isFirst)
+
+        // У каждого аккаунта своя копия программы. Окно входа (--login) — тоже отдельная копия.
+        var account = AccountLauncher.SelectAccount(e.Args);
+        var loginRequested = e.Args.Contains(AccountLauncher.LoginArgument);
+        if (!ClaimInstance(loginRequested ? "login" : AccountLauncher.InstanceKey(account)))
         {
-            // Программа уже работает в этом сеансе (возможно, свёрнута в трей) — просим её показать окно.
-            Log.Info("Копия уже запущена в этом сеансе — показываем её окно и выходим");
-            _showWindowSignal.Set();
             Shutdown();
             return;
         }
 
-        var settings = SettingsService.Load();
-        Log.Info($"Настройки загружены: имя «{settings.DisplayName}», Id {settings.UserId}, автозапуск {settings.AutoStart}");
-        if (string.IsNullOrWhiteSpace(settings.DisplayName))
+        // Аккаунта нет — окно входа (если раньше не выбрали «работать без аккаунта»).
+        if (account == null && (loginRequested || !SettingsService.Load().NoAccount))
         {
-            Log.Info("Первый запуск — спрашиваем имя");
-            var settingsWindow = new SettingsWindow(Environment.UserName, settings.AutoStart);
-            if (settingsWindow.ShowDialog() != true)
+            Log.Info("Аккаунта нет — показываем вход");
+            var login = new LoginWindow(null, allowNoAccount: !loginRequested);
+            login.ShowDialog();
+            if (login.Account != null)
             {
-                Log.Info("Ввод имени отменён — выходим");
+                account = login.Account;
+                if (!ClaimInstance(AccountLauncher.InstanceKey(account)))
+                {
+                    Shutdown();
+                    return;
+                }
+            }
+            else if (login.ChoseNoAccount)
+            {
+                var root = SettingsService.Load();
+                root.NoAccount = true;
+                SettingsService.Save(root);
+                Log.Info("Выбрана работа без аккаунта");
+            }
+            else
+            {
+                Log.Info("Окно входа закрыто — выходим");
                 Shutdown();
                 return;
             }
-            settings.DisplayName = settingsWindow.EnteredName;
-            settings.AutoStart = settingsWindow.AutoStart;
-            SettingsService.Save(settings);
-            Log.Info($"Имя сохранено: «{settings.DisplayName}»");
+        }
+
+        AppSettings settings;
+        ServerSession? session = null;
+        if (account != null)
+        {
+            session = AccountLauncher.CreateSession(account);
+            if (session == null)
+            {
+                // Ключ не расшифровался (например, профиль перенесли на другой компьютер) — входим заново.
+                var again = new LoginWindow(account, allowNoAccount: false);
+                again.ShowDialog();
+                if (again.Account == null)
+                {
+                    Shutdown();
+                    return;
+                }
+                account = again.Account;
+                session = AccountLauncher.CreateSession(account)!;
+            }
+            settings = AccountLauncher.Activate(account);
+        }
+        else
+        {
+            settings = SettingsService.Load();
+            Log.Info($"Без аккаунта: имя «{settings.DisplayName}», Id {settings.UserId}, автозапуск {settings.AutoStart}");
+            if (string.IsNullOrWhiteSpace(settings.DisplayName))
+            {
+                Log.Info("Первый запуск — спрашиваем имя");
+                var settingsWindow = new SettingsWindow(Environment.UserName, settings.AutoStart);
+                if (settingsWindow.ShowDialog() != true)
+                {
+                    Log.Info("Ввод имени отменён — выходим");
+                    Shutdown();
+                    return;
+                }
+                settings.DisplayName = settingsWindow.EnteredName;
+                settings.AutoStart = settingsWindow.AutoStart;
+                SettingsService.Save(settings);
+                Log.Info($"Имя сохранено: «{settings.DisplayName}»");
+            }
         }
         AutoStartService.Apply(settings.AutoStart);
 
         Log.Info("Создаём главное окно");
-        _mainWindow = new Views.MainWindow(settings);
+        _mainWindow = new Views.MainWindow(settings, session, account);
         MainWindow = _mainWindow;
         // При автозапуске с Windows окно не показываем — программа сразу работает в трее.
-        if (!e.Args.Contains(AutoStartService.TrayArgument))
+        var autostart = e.Args.Contains(AutoStartService.TrayArgument);
+        if (!autostart)
             _mainWindow.Show();
         if (e.Args.Contains(UpdateService.UpdatedArgument))
             _mainWindow.NotifyUpdated();
-        Log.Info("Запуск завершён");
 
-        ThreadPool.RegisterWaitForSingleObject(_showWindowSignal,
+        // Автозапуск: остальные аккаунты этого компьютера — каждый в своей копии.
+        if (autostart && account != null && !e.Args.Contains(AccountLauncher.AccountArgument))
+            foreach (var other in AccountStore.All().Where(a => a.Id != account.Id))
+                AccountLauncher.StartCopy(AccountLauncher.AccountArgument, other.Id.ToString(), AutoStartService.TrayArgument);
+        Log.Info("Запуск завершён");
+    }
+
+    /// <summary>
+    /// Занять «единственную копию» для ключа (аккаунта). false — такая копия уже работает: ей отправлена
+    /// просьба показать окно.
+    /// </summary>
+    private bool ClaimInstance(string key)
+    {
+        // Ключ «main» — прежние имена: копия без аккаунта узнаёт и старую версию программы.
+        var suffix = key == "main" ? "" : "." + key;
+        var mutex = new Mutex(true, InstanceMutexName + suffix, out var isFirst);
+        var signal = new EventWaitHandle(false, EventResetMode.AutoReset, ShowWindowEventName + suffix);
+        if (!isFirst)
+        {
+            Log.Info("Эта копия уже запущена в этом сеансе — показываем её окно и выходим");
+            signal.Set();
+            signal.Dispose();
+            mutex.Dispose();
+            return false;
+        }
+        ReleaseInstance();
+        _singleInstance = mutex;
+        _showWindowSignal = signal;
+        _showWindowWait = ThreadPool.RegisterWaitForSingleObject(signal,
             (_, _) => Dispatcher.BeginInvoke(() => _mainWindow?.ShowFromTray()),
             null, Timeout.Infinite, executeOnlyOnce: false);
+        return true;
+    }
+
+    /// <summary>Отпустить «единственную копию» (перед запуском этого же аккаунта в новой копии).</summary>
+    public static void ReleaseInstance()
+    {
+        if (Current is not App app) return;
+        app._showWindowWait?.Unregister(null);
+        app._showWindowWait = null;
+        app._showWindowSignal?.Dispose();
+        app._showWindowSignal = null;
+        if (app._singleInstance != null)
+        {
+            try
+            {
+                app._singleInstance.ReleaseMutex();
+            }
+            catch (ApplicationException)
+            {
+                // Мьютекс принадлежит другому потоку — закроется вместе с процессом.
+            }
+            app._singleInstance.Dispose();
+            app._singleInstance = null;
+        }
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
@@ -122,8 +228,7 @@ public partial class App : Application
     protected override void OnExit(ExitEventArgs e)
     {
         Log.Info($"Выход, код {e.ApplicationExitCode}");
-        _showWindowSignal?.Dispose();
-        _singleInstance?.Dispose();
+        ReleaseInstance();
         base.OnExit(e);
     }
 }

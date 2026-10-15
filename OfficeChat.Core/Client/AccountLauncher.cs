@@ -41,6 +41,7 @@ public static class AccountLauncher
         settings.DisplayName = account.DisplayName;
         SettingsService.Save(settings);
         AccountStore.MarkUsed(account.Id);
+        UpdateService.RestartArguments = [AccountArgument, account.Id.ToString()];
         Log.Info($"Аккаунт «{account.Login}» ({account.DisplayName}), сервер {account.ServerHost}:{account.ServerPort}, " +
                  $"данные — {SettingsService.DataFolder}");
         return settings;
