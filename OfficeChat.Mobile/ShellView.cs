@@ -51,6 +51,15 @@ public sealed class ShellView : UserControl
             SetRoot(new LoginPage(account));
     }
 
+    /// <summary>Открыть переписку (нажали на уведомление).</summary>
+    public void OpenConversation(Guid key)
+    {
+        if (MobileSession.Chat?.Contacts.FirstOrDefault(c => c.Key == key) is not { } contact) return;
+        if (Current is ConversationPage page && page.Contact == contact) return;
+        while (_stack.Count > 1) Pop();
+        Push(new ConversationPage(contact));
+    }
+
     /// <summary>Начать заново с этой страницы (после входа, выхода).</summary>
     public void SetRoot(Page page)
     {

@@ -1,11 +1,11 @@
-# Сборка OfficeChat: exe для Windows, AppImage для Linux и сервер (Windows и Linux).
+# Сборка OfficeChat: exe для Windows, AppImage для Linux, APK для Android и сервер (Windows и Linux).
 #
 # - каждый push и pull request — файлы появляются в Actions → запуск → «Artifacts»;
 # - метка вида v1.2.0 — дополнительно создаётся GitHub Release с этими файлами;
 # - вручную — кнопка «Run workflow» на вкладке Actions.
 #
 # Проекты: OfficeChat.Core (общий код), OfficeChat.Windows (WPF), OfficeChat.Linux (Avalonia),
-# OfficeChat.Server (сервер, тесты — OfficeChat.Server.Tests).
+# OfficeChat.Mobile (интерфейс телефона) и OfficeChat.Android, OfficeChat.Server (сервер, тесты — OfficeChat.Server.Tests).
 #
 # Версия — 1.1.<номер запуска>. Если в секретах репозитория есть UPDATE_SIGNING_KEY, файлы подписываются:
 # тогда программы в офисе обновляются друг от друга по сети. Без ключа сборка работает как обычно,
@@ -126,10 +126,53 @@ jobs:
             server-dist/officechat-server-linux-x64
           if-no-files-found: error
 
+  android:
+    name: Android (apk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Инструменты .NET для Android
+        run: dotnet workload install android
+
+      # Подпись приложения. Android обновляет программу поверх старой, только если подпись та же, — поэтому ключ
+      # постоянный, в секретах репозитория (ANDROID_KEYSTORE — файл в base64, ANDROID_KEYSTORE_PASSWORD — пароль).
+      # Без них сборка подписывается временным ключом: поставить можно, но следующую версию — только через удаление.
+      - name: Сборка APK
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          signing=()
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            echo "$ANDROID_KEYSTORE" | base64 -d > "$RUNNER_TEMP/officechat.keystore"
+            signing=(-p:AndroidKeyStore=true -p:AndroidSigningKeyStore="$RUNNER_TEMP/officechat.keystore"
+              -p:AndroidSigningKeyAlias=officechat
+              -p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD -p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD)
+          else
+            echo "::warning::Секрет ANDROID_KEYSTORE не задан — APK подписан временным ключом, обновление поверх установленного не сработает"
+          fi
+          dotnet publish OfficeChat.Android/OfficeChat.Android.csproj -c Release \
+            -p:AndroidSdkDirectory="$ANDROID_HOME" -p:JavaSdkDirectory="$JAVA_HOME_17_X64" \
+            -p:ApplicationDisplayVersion=$VERSION -p:ApplicationVersion=${{ github.run_number }} \
+            "${signing[@]}"
+          mkdir -p android-dist
+          cp OfficeChat.Android/bin/Release/net10.0-android/publish/*-Signed.apk android-dist/OfficeChat-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OfficeChat-android
+          path: android-dist/OfficeChat-android.apk
+          if-no-files-found: error
+
   release:
     name: Выпуск (GitHub Release)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, server]
+    needs: [windows, linux, server, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write

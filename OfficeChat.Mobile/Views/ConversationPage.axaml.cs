@@ -15,6 +15,8 @@ namespace OfficeChat.Mobile.Views;
 public partial class ConversationPage : Page
 {
     private readonly Contact _contact;
+
+    public Contact Contact => _contact;
     private ChatMessage? _replyTo;
     private ChatMessage? _editing;
     private bool _settingInput;
