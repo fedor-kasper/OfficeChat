@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Сервер OfficeChat: аккаунты, вся переписка и файлы, синхронизация устройств (компьютеры, телефоны).
+    Работает на Windows (как служба) и Linux (systemd). Протокол — docs/SERVER-PROTOCOL.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>OfficeChat.Server</RootNamespace>
+    <AssemblyName>officechat-server</AssemblyName>
+    <AssemblyTitle>OfficeChat Server</AssemblyTitle>
+    <Version>1.0.0</Version>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\OfficeChat.Core\OfficeChat.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.0" />
+  </ItemGroup>
+
+  <!-- Страница администратора — внутри программы (сервер остаётся одним файлом) -->
+  <ItemGroup>
+    <Content Remove="wwwroot\**" />
+    <EmbeddedResource Include="wwwroot\admin\**" LogicalName="admin/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="OfficeChat.Server.Tests" />
+  </ItemGroup>
+
+</Project>
