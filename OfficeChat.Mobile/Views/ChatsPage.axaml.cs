@@ -64,25 +64,19 @@ public partial class ChatsPage : Page
         if (sender is not Control control || control.DataContext is not Contact contact || MobileSession.Chat is not { } chat)
             return;
         e.Handled = true;
-        var menu = new MenuFlyout();
-        menu.Items.Add(Item(contact.IsPinned ? "Открепить" : "📌 Закрепить", () => chat.SetPinned(contact, !contact.IsPinned)));
-        menu.Items.Add(Item(contact.IsMuted ? "🔔 Включить уведомления" : "🔕 Без уведомлений",
+        var menu = new List<Dialogs.Action>();
+        menu.Add(new Dialogs.Action(contact.IsPinned ? "Открепить" : "📌 Закрепить", () => chat.SetPinned(contact, !contact.IsPinned)));
+        menu.Add(new Dialogs.Action(contact.IsMuted ? "🔔 Включить уведомления" : "🔕 Без уведомлений",
             () => chat.SetMuted(contact, !contact.IsMuted)));
         if (contact.CanRemove)
-            menu.Items.Add(Item("Удалить из списка", async () =>
+            menu.Add(new Dialogs.Action("Удалить из списка", async () =>
             {
                 if (await Dialogs.ConfirmAsync(this, $"Удалить «{contact.Title}» из списка вместе с перепиской?"))
                     chat.RemoveContact(contact);
             }));
-        menu.ShowAt(control, true);
+        Dialogs.Actions(this, null, menu);
     }
 
-    internal static MenuItem Item(string header, Action action)
-    {
-        var item = new MenuItem { Header = header, FontSize = 16, Padding = new Avalonia.Thickness(12, 10) };
-        item.Click += (_, _) => action();
-        return item;
-    }
 
     private void Reminders_Click(object? sender, RoutedEventArgs e) => Shell.Push(new RemindersPage());
 
@@ -90,10 +84,10 @@ public partial class ChatsPage : Page
 
     private void Menu_Click(object? sender, RoutedEventArgs e)
     {
-        var menu = new MenuFlyout();
-        menu.Items.Add(Item("Новая группа", () => Shell.Push(new GroupPage(null))));
-        menu.Items.Add(Item("Напоминания", () => Shell.Push(new RemindersPage())));
-        menu.Items.Add(Item("Аккаунт и настройки", () => Shell.Push(new SettingsPage())));
-        menu.ShowAt(MenuButton);
+        var menu = new List<Dialogs.Action>();
+        menu.Add(new Dialogs.Action("Новая группа", () => Shell.Push(new GroupPage(null))));
+        menu.Add(new Dialogs.Action("Напоминания", () => Shell.Push(new RemindersPage())));
+        menu.Add(new Dialogs.Action("Аккаунт и настройки", () => Shell.Push(new SettingsPage())));
+        Dialogs.Actions(this, null, menu);
     }
 }

@@ -277,26 +277,26 @@ public partial class ConversationPage : Page
         if (sender is not Control control || control.DataContext is not ChatMessage message || message.IsSystem) return;
         e.Handled = true;
         var chat = MobileSession.Chat;
-        var menu = new MenuFlyout();
-        menu.Items.Add(ChatsPage.Item("↩ Ответить", () => StartReply(message)));
+        var menu = new List<Dialogs.Action>();
+        menu.Add(new Dialogs.Action("↩ Ответить", () => StartReply(message)));
         if (message.HasText)
-            menu.Items.Add(ChatsPage.Item("📋 Копировать", async () =>
+            menu.Add(new Dialogs.Action("📋 Копировать", async () =>
             {
                 if (TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard) await clipboard.SetTextAsync(message.Text);
             }));
-        menu.Items.Add(ChatsPage.Item("⏰ Напомнить об этом", () => Shell.Push(new ReminderEditPage(null, message.PreviewText, _contact))));
+        menu.Add(new Dialogs.Action("⏰ Напомнить об этом", () => Shell.Push(new ReminderEditPage(null, message.PreviewText, _contact))));
         if (message.CanEdit && !message.IsImage && !message.IsFile)
-            menu.Items.Add(ChatsPage.Item("✏ Изменить", () => StartEdit(message)));
+            menu.Add(new Dialogs.Action("✏ Изменить", () => StartEdit(message)));
         if (message.CanCancel)
-            menu.Items.Add(ChatsPage.Item("Отменить отправку", () => chat?.Delete(_contact, message, forEveryone: true)));
+            menu.Add(new Dialogs.Action("Отменить отправку", () => chat?.Delete(_contact, message, forEveryone: true)));
         else if (message.CanDeleteForEveryone)
-            menu.Items.Add(ChatsPage.Item("🗑 Удалить у всех", async () =>
+            menu.Add(new Dialogs.Action("🗑 Удалить у всех", async () =>
             {
                 if (await Dialogs.ConfirmAsync(this, "Удалить сообщение у всех?", "Удалить"))
                     chat?.Delete(_contact, message, forEveryone: true);
             }));
-        menu.Items.Add(ChatsPage.Item("Удалить у себя", () => chat?.Delete(_contact, message, forEveryone: false)));
-        menu.ShowAt(control, true);
+        menu.Add(new Dialogs.Action("Удалить у себя", () => chat?.Delete(_contact, message, forEveryone: false)));
+        Dialogs.Actions(this, null, menu);
     }
 
     // ---- Меню переписки ----
@@ -304,25 +304,25 @@ public partial class ConversationPage : Page
     private void Menu_Click(object? sender, RoutedEventArgs e)
     {
         if (MobileSession.Chat is not { } chat) return;
-        var menu = new MenuFlyout();
+        var menu = new List<Dialogs.Action>();
         if (_contact.IsGroup)
-            menu.Items.Add(ChatsPage.Item("👥 Участники", () => Shell.Push(new GroupPage(_contact))));
-        menu.Items.Add(ChatsPage.Item(_contact.IsMuted ? "🔔 Включить уведомления" : "🔕 Без уведомлений",
+            menu.Add(new Dialogs.Action("👥 Участники", () => Shell.Push(new GroupPage(_contact))));
+        menu.Add(new Dialogs.Action(_contact.IsMuted ? "🔔 Включить уведомления" : "🔕 Без уведомлений",
             () => chat.SetMuted(_contact, !_contact.IsMuted)));
-        menu.Items.Add(ChatsPage.Item(_contact.IsPinned ? "Открепить" : "📌 Закрепить", () => chat.SetPinned(_contact, !_contact.IsPinned)));
-        menu.Items.Add(ChatsPage.Item("Очистить переписку", async () =>
+        menu.Add(new Dialogs.Action(_contact.IsPinned ? "Открепить" : "📌 Закрепить", () => chat.SetPinned(_contact, !_contact.IsPinned)));
+        menu.Add(new Dialogs.Action("Очистить переписку", async () =>
         {
             if (await Dialogs.ConfirmAsync(this, "Удалить всю переписку на этом телефоне? У собеседника она останется.", "Очистить"))
                 chat.ClearConversation(_contact);
         }));
         if (_contact.IsGroup)
-            menu.Items.Add(ChatsPage.Item("Выйти из группы", async () =>
+            menu.Add(new Dialogs.Action("Выйти из группы", async () =>
             {
                 if (!await Dialogs.ConfirmAsync(this, $"Выйти из группы «{_contact.Title}»?", "Выйти")) return;
                 chat.LeaveGroup(_contact);
                 Shell.Pop();
             }));
-        menu.ShowAt(MenuButton);
+        Dialogs.Actions(this, null, menu);
     }
 
     private void Game_Click(object? sender, RoutedEventArgs e)
@@ -338,9 +338,9 @@ public partial class ConversationPage : Page
             _ = Dialogs.InfoAsync(this, "Сыграть можно с тем, кто сейчас в сети.");
             return;
         }
-        var menu = new MenuFlyout();
+        var menu = new List<Dialogs.Action>();
         foreach (var kind in Enum.GetValues<GameKind>())
-            menu.Items.Add(ChatsPage.Item(BoardGame.TitleOf(kind), () => Shell.Push(new GamePage(games.Invite(_contact, kind)))));
-        menu.ShowAt(GameButton);
+            menu.Add(new Dialogs.Action(BoardGame.TitleOf(kind), () => Shell.Push(new GamePage(games.Invite(_contact, kind)))));
+        Dialogs.Actions(this, null, menu);
     }
 }

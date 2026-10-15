@@ -106,10 +106,10 @@ public sealed class RemindersPage : Page
             var snooze = Small("⏱ Отложить", () => { });
             snooze.Click += (_, _) =>
             {
-                var menu = new MenuFlyout();
+                var menu = new List<Dialogs.Action>();
                 foreach (var (title, until) in ReminderService.SnoozeChoices())
-                    menu.Items.Add(ChatsPage.Item(title, () => service.Snooze(reminder, until)));
-                menu.ShowAt(snooze);
+                    menu.Add(new Dialogs.Action(title, () => service.Snooze(reminder, until)));
+                Dialogs.Actions(this, null, menu);
             };
             buttons.Children.Add(snooze);
         }

@@ -9,7 +9,16 @@ namespace OfficeChat.Mobile;
 /// <summary>Приложение для телефона: один экран (<see cref="ShellView"/>), внутри — переходы между страницами.</summary>
 public partial class MobileApp : Application
 {
-    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+    public override void Initialize()
+    {
+        // Программа на русском: даты (месяцы в выборе даты) — тоже, как бы ни был настроен телефон.
+        var russian = System.Globalization.CultureInfo.GetCultureInfo("ru-RU");
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = russian;
+        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = russian;
+        System.Globalization.CultureInfo.CurrentCulture = russian;
+        System.Globalization.CultureInfo.CurrentUICulture = russian;
+        AvaloniaXamlLoader.Load(this);
+    }
 
     public override void OnFrameworkInitializationCompleted()
     {

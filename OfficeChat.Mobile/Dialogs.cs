@@ -30,6 +30,58 @@ public static class Dialogs
     public static async Task<bool> FormAsync(Control owner, string text, Control content, string ok = "Сохранить") =>
         (await ShowAsync(owner, text, ok, "Отмена", content)).Ok;
 
+    /// <summary>Действие для <see cref="Actions"/>: подпись и что сделать.</summary>
+    public sealed record Action(string Title, System.Action Run, bool Danger = false);
+
+    /// <summary>Панель действий снизу экрана (как меню по долгому нажатию в телефонах).</summary>
+    public static void Actions(Control owner, string? title, IEnumerable<Action> actions)
+    {
+        var shell = ShellOf(owner);
+        if (shell == null) return;
+        var list = new StackPanel();
+        if (!string.IsNullOrEmpty(title))
+            list.Children.Add(new TextBlock
+            {
+                Text = title, FontSize = 13, Foreground = new SolidColorBrush(Color.Parse("#6B7280")),
+                Margin = new Thickness(20, 4, 20, 8), TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+        Border? overlay = null;
+        foreach (var action in actions)
+        {
+            var button = new Button
+            {
+                Content = action.Title, FontSize = 17, Padding = new Thickness(20, 14), Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0), CornerRadius = new CornerRadius(0),
+                HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Left,
+                Foreground = action.Danger ? new SolidColorBrush(Color.Parse("#DC2626")) : Brushes.Black,
+            };
+            button.Click += (_, _) =>
+            {
+                shell.CloseOverlay(overlay!);
+                action.Run();
+            };
+            list.Children.Add(button);
+        }
+        overlay = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(110, 0, 0, 0)),
+            Child = new Border
+            {
+                Background = Brushes.White,
+                CornerRadius = new CornerRadius(16, 16, 0, 0),
+                Padding = new Thickness(0, 12, 0, 16),
+                VerticalAlignment = VerticalAlignment.Bottom,
+                Child = new ScrollViewer { Content = list, MaxHeight = 560 },
+            },
+        };
+        // Нажатие мимо панели — закрыть.
+        overlay.PointerPressed += (_, e) =>
+        {
+            if (e.Source == overlay) shell.CloseOverlay(overlay);
+        };
+        shell.ShowOverlay(overlay, () => shell.CloseOverlay(overlay));
+    }
+
     private static Task<(bool Ok, object? _)> ShowAsync(Control owner, string text, string ok, string? cancel, Control? content)
     {
         var shell = ShellOf(owner) ?? throw new InvalidOperationException("Нет экрана для диалога");
