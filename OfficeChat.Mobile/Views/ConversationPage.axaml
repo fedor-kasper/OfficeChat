@@ -98,8 +98,13 @@
                     <Button x:Name="SendButton" DockPanel.Dock="Right" Classes="primary" Width="46" Height="46"
                             CornerRadius="23" Padding="0" Content="➤" FontSize="18" VerticalAlignment="Bottom"
                             Margin="6,0,0,0" Click="Send_Click" />
+                    <!-- Клавиатура телефона: многострочный текст (Enter — новая строка), подсказки слов и
+                         исправления, заглавная буква в начале предложения -->
                     <TextBox x:Name="InputBox" Watermark="Сообщение" AcceptsReturn="True" TextWrapping="Wrap"
-                             MaxHeight="140" MaxLength="4000" VerticalContentAlignment="Center" />
+                             MaxHeight="200" MaxLength="4000" VerticalContentAlignment="Center"
+                             TextInputOptions.Multiline="True" TextInputOptions.ReturnKeyType="Default"
+                             TextInputOptions.ContentType="Normal" TextInputOptions.AutoCapitalization="True"
+                             TextInputOptions.ShowSuggestions="True" />
                 </DockPanel>
             </StackPanel>
         </Border>

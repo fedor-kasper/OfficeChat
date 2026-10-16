@@ -29,19 +29,31 @@ public partial class ConversationPage : Page
         _contact = contact;
         DataContext = contact;
         MessagesList.ItemsSource = contact.Messages;
+        // Enter на телефоне — новая строка (отправка — кнопкой ➤); списки продолжаются сами, как в Markdown.
         InputBox.TextChanged += (_, _) =>
         {
-            if (!_settingInput && !string.IsNullOrEmpty(InputBox.Text)) MobileSession.Chat?.NotifyTyping(_contact);
+            if (_settingInput) return;
+            var text = InputBox.Text ?? "";
+            if (text.Length > 0) MobileSession.Chat?.NotifyTyping(_contact);
+            ContinueList(_previousInput, text);
+            _previousInput = InputBox.Text ?? "";
         };
-        InputBox.KeyDown += (_, e) =>
-        {
-            // Физическая клавиатура: Enter — отправить, Shift+Enter — новая строка.
-            if (e.Key == Key.Enter && !e.KeyModifiers.HasFlag(KeyModifiers.Shift))
-            {
-                e.Handled = true;
-                Send();
-            }
-        };
+    }
+
+    private string _previousInput = "";
+
+    /// <summary>Набрали перевод строки (ровно один символ «\n») — продолжить или закончить список.</summary>
+    private void ContinueList(string before, string after)
+    {
+        if (after.Length != before.Length + 1) return;
+        var at = 0;
+        while (at < before.Length && before[at] == after[at]) at++;
+        if (after[at] != '\n' || after.Remove(at, 1) != before) return;
+        if (ListContinuation.AfterNewLine(after, at + 1) is not { } result) return;
+        _settingInput = true;
+        InputBox.Text = result.Text;
+        InputBox.CaretIndex = result.Caret;
+        _settingInput = false;
     }
 
     public override void OnAppearing()
@@ -139,6 +151,7 @@ public partial class ConversationPage : Page
         _settingInput = true;
         InputBox.Text = text;
         InputBox.CaretIndex = text.Length;
+        _previousInput = text;
         _settingInput = false;
     }
 
