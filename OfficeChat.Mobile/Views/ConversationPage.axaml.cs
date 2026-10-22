@@ -239,26 +239,25 @@ public partial class ConversationPage : Page
         {
             try
             {
-                var name = file.Name;
-                var size = (await file.GetBasicPropertiesAsync()).Size ?? 0;
-                if (ImageStore.IsImageFile(name) && (long)size <= ImageStore.MaxBytes)
+                var name = FileStore.SafeFileName(file.Name);
+                // Файл с телефона (content://) — сначала копия в папку программы, по ней и размер.
+                var folder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(folder);
+                var copy = Path.Combine(folder, name);
+                try
                 {
-                    await using var stream = await file.OpenReadAsync();
-                    using var memory = new MemoryStream();
-                    await stream.CopyToAsync(memory);
-                    chat.SendImage(_contact, memory.ToArray(), name, "", replyTo);
-                }
-                else
-                {
-                    // Файл с телефона (content://) — сначала копия во временную папку программы.
-                    var temp = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N") + Path.GetExtension(name));
                     await using (var source = await file.OpenReadAsync())
-                    await using (var target = File.Create(temp))
+                    await using (var target = File.Create(copy))
                         await source.CopyToAsync(target);
-                    var copy = Path.Combine(Path.GetDirectoryName(temp)!, name);
-                    if (File.Exists(copy)) copy = Path.Combine(Path.GetDirectoryName(temp)!, Guid.NewGuid().ToString("N")[..6] + "-" + name);
-                    File.Move(temp, copy);
-                    await chat.SendFileAsync(_contact, copy, "", replyTo);
+                    if (ImageStore.IsImageFile(name) && new FileInfo(copy).Length <= ImageStore.MaxBytes)
+                        chat.SendImage(_contact, await File.ReadAllBytesAsync(copy), name, "", replyTo);
+                    else
+                        await chat.SendFileAsync(_contact, copy, "", replyTo);
+                }
+                finally
+                {
+                    // SendFileAsync уже скопировал файл в хранилище программы.
+                    try { Directory.Delete(folder, recursive: true); } catch (IOException) { }
                 }
                 replyTo = null;
             }

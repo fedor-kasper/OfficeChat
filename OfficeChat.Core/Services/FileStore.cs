@@ -31,17 +31,26 @@ public static class FileStore
     public static string NewIncomingTempFile(long size)
     {
         Directory.CreateDirectory(IncomingFolder);
+        if (FreeSpace(IncomingFolder) is { } free && free < size + ReserveBytes)
+            throw new IOException($"Недостаточно места на диске для приёма файла ({size / 1024 / 1024} МБ, свободно {free / 1024 / 1024} МБ).");
+        return Path.Combine(IncomingFolder, Guid.NewGuid().ToString("N") + ".part");
+    }
+
+    /// <summary>
+    /// Свободное место там, где лежит папка (null — не удалось узнать). Именно у самой папки, а не у корня пути:
+    /// на Android корень «/» — системный раздел только для чтения, свободно там 0, и любой файл отклонялся бы.
+    /// </summary>
+    private static long? FreeSpace(string folder)
+    {
         try
         {
-            var free = new DriveInfo(Path.GetPathRoot(Path.GetFullPath(IncomingFolder))!).AvailableFreeSpace;
-            if (free < size + ReserveBytes)
-                throw new IOException($"Недостаточно места на диске для приёма файла ({size / 1024 / 1024} МБ, свободно {free / 1024 / 1024} МБ).");
+            var drive = new DriveInfo(Path.GetFullPath(folder));
+            return drive.TotalSize > 0 ? drive.AvailableFreeSpace : null;
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
         {
-            // Не удалось определить диск — принимаем как есть.
+            return null;
         }
-        return Path.Combine(IncomingFolder, Guid.NewGuid().ToString("N") + ".part");
     }
 
     /// <summary>Убирает из имени то, что недопустимо в имени файла (в Windows и Linux).</summary>
