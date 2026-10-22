@@ -53,6 +53,8 @@ public static class ServerApp
         builder.Services.AddSingleton<ChatLogic>();
         builder.Services.AddSingleton<LoginThrottle>();
         builder.Services.AddHostedService<DiscoveryResponder>();
+        builder.Services.AddSingleton<ServerUpdater>();
+        builder.Services.AddHostedService(services => services.GetRequiredService<ServerUpdater>());
         builder.Services.ConfigureHttpJsonOptions(json =>
         {
             json.SerializerOptions.PropertyNamingPolicy = ServerProtocol.Json.PropertyNamingPolicy;

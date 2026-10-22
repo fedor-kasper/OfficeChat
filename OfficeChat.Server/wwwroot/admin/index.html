@@ -63,6 +63,11 @@
   dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); max-width: 420px; width: calc(100% - 32px); }
   dialog::backdrop { background: rgba(0,0,0,.4); }
   .password { font: 600 22px/1.3 ui-monospace, Consolas, monospace; letter-spacing: .08em; padding: 10px; text-align: center; background: var(--bg); border-radius: 8px; margin: 12px 0; user-select: all; }
+  .server-card { margin-top: 16px; }
+  .server-card h3 { margin: 0 0 6px; font-size: 16px; }
+  .server-card .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .server-card .status { margin-top: 10px; font-size: 14px; min-height: 1em; }
+  .server-card .status.ok { color: var(--ok); }
   .hidden { display: none !important; }
   /* Телефон: строки таблицы — карточками */
   @media (max-width: 640px) {
@@ -147,6 +152,17 @@
         </table>
       </div>
       <div class="error" id="admin-error"></div>
+    </div>
+    <div class="card server-card" id="server-card">
+      <h3>Сервер</h3>
+      <div class="muted" id="server-version"></div>
+      <div class="muted" id="server-last"></div>
+      <div class="row">
+        <button id="server-check">Проверить обновления на GitHub</button>
+        <button id="server-upload">Загрузить новую версию из файла…</button>
+        <input type="file" id="server-file" class="hidden">
+      </div>
+      <div class="status" id="server-status"></div>
     </div>
   </section>
 </main>
@@ -278,9 +294,11 @@ async function load() {
     $("not-admin").classList.toggle("hidden", me.isAdmin);
     $("stats").classList.toggle("hidden", !me.isAdmin);
     $("accounts-card").classList.toggle("hidden", !me.isAdmin);
+    $("server-card").classList.toggle("hidden", !me.isAdmin);
     if (!me.isAdmin) { accounts = []; render(); return; }
     accounts = await api("GET", "/api/admin/accounts");
     render();
+    await loadServer();
   } catch (e) {
     $("admin-error").textContent = e.message;
   }
@@ -308,6 +326,79 @@ async function setAdmin(a, isAdmin) {
   try { await api("POST", "/api/admin/accounts/" + a.id + "/admin", { isAdmin }); await load(); }
   catch (e) { $("admin-error").textContent = e.message; }
 }
+
+// ---- Обновление сервера ----
+
+async function loadServer() {
+  const info = await api("GET", "/api/admin/server");
+  $("server-version").textContent = "Версия " + info.version + " (" + info.platform + "). " +
+    (!info.canUpdate ? "Запущен не из собранного файла — обновление недоступно."
+      : info.autoUpdate ? "Обновляется сам: раз в 6 часов проверяет выпуски на GitHub."
+      : "Сам не обновляется (параметр --no-auto-update) — загрузите новую версию из файла.");
+  $("server-last").textContent = info.lastCheck ? "Последняя проверка: " + info.lastCheck : "";
+  $("server-check").disabled = $("server-upload").disabled = !info.canUpdate;
+  return info;
+}
+
+function serverStatus(text, ok) {
+  $("server-status").textContent = text;
+  $("server-status").className = "status " + (ok ? "ok" : "error");
+}
+
+// После установки сервер перезапускается: ждём, пока он ответит уже новой версией.
+async function waitForRestart(version) {
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    try {
+      const info = await (await fetch("/api/server", { cache: "no-store" })).json();
+      if (info.version === version) {
+        serverStatus("Готово: сервер работает на версии " + version, true);
+        $("server-meta").textContent = info.name + " · версия " + info.version;
+        await loadServer();
+        return;
+      }
+    } catch (e) { }
+  }
+  serverStatus("Сервер не ответил новой версией за 2 минуты — посмотрите журнал на сервере", false);
+}
+
+async function afterUpdate(result) {
+  serverStatus(result.message, result.ok);
+  if (result.ok && result.version) await waitForRestart(result.version);
+  else await loadServer();
+}
+
+$("server-check").addEventListener("click", async () => {
+  $("server-check").disabled = true;
+  serverStatus("Проверяю выпуски на GitHub…", true);
+  try { await afterUpdate(await api("POST", "/api/admin/server/check")); }
+  catch (e) { serverStatus(e.message, false); }
+  finally { $("server-check").disabled = false; }
+});
+
+$("server-upload").addEventListener("click", () => $("server-file").click());
+$("server-file").addEventListener("change", async () => {
+  const file = $("server-file").files[0];
+  $("server-file").value = "";
+  if (!file) return;
+  if (!confirm("Установить «" + file.name + "»? Сервер перезапустится, приложения переподключатся сами.")) return;
+  serverStatus("Загружаю " + file.name + "…", true);
+  $("server-upload").disabled = true;
+  try {
+    const response = await fetch("/api/admin/server/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream", Authorization: "Bearer " + token },
+      body: file,
+    });
+    if (response.status === 401) { saveToken(null); show("login"); return; }
+    if (!response.ok) throw new Error("Ошибка " + response.status);
+    await afterUpdate(await response.json());
+  } catch (e) {
+    serverStatus(e.message, false);
+  } finally {
+    $("server-upload").disabled = false;
+  }
+});
 
 $("login-form").addEventListener("submit", async event => {
   event.preventDefault();

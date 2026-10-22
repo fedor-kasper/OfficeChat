@@ -118,6 +118,17 @@ jobs:
           mv server-dist/win-x64/officechat-server.exe server-dist/officechat-server-windows-x64.exe
           mv server-dist/linux-x64/officechat-server server-dist/officechat-server-linux-x64
 
+      - name: Подпись сервера (для самообновления)
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          if [ -n "$UPDATE_SIGNING_KEY" ]; then
+            tools/sign-update.sh server-dist/officechat-server-windows-x64.exe "$VERSION" server-win-x64
+            tools/sign-update.sh server-dist/officechat-server-linux-x64 "$VERSION" server-linux-x64
+          else
+            echo "::warning::Секрет UPDATE_SIGNING_KEY не задан — сервер без подписи, сам обновляться не сможет"
+          fi
+
       - uses: actions/upload-artifact@v4
         with:
           name: OfficeChat-server

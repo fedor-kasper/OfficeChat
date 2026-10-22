@@ -3,7 +3,7 @@
 #
 #   UPDATE_SIGNING_KEY="$(cat key.pem)" tools/sign-update.sh <файл> <версия> <система>
 #
-# Система — win-x64 или linux-x64. Ключ — закрытый ключ ECDSA P-256 в формате PEM
+# Система — win-x64 или linux-x64 (программа), server-win-x64 или server-linux-x64 (сервер). Ключ — закрытый ключ ECDSA P-256 в формате PEM
 # (в GitHub Actions — секрет UPDATE_SIGNING_KEY). Программа проверяет подпись открытым ключом
 # из Services/UpdateService.cs и без верной подписи обновление не примет.
 #

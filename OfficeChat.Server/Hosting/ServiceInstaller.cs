@@ -87,10 +87,16 @@ public static class ServiceInstaller
         Directory.CreateDirectory(LinuxProgramFolder);
         var target = Path.Combine(LinuxProgramFolder, "officechat-server");
         if (!string.Equals(Path.GetFullPath(exe), target, StringComparison.Ordinal))
-            File.Copy(exe, target, overwrite: true);
+        {
+            // Через временный файл: работающую программу не перезаписать, а заменить можно.
+            File.Copy(exe, target + ".new", overwrite: true);
+            File.Move(target + ".new", target, overwrite: true);
+        }
         File.SetUnixFileMode(target, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
                                      UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
                                      UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+        // Папка программы — сервису: обновляясь, он сам подменяет свой файл (только подписанной сборкой).
+        Run("chown", "-R", $"{LinuxUser}:{LinuxUser}", LinuxProgramFolder);
         Directory.CreateDirectory(dataFolder);
         Run("chown", "-R", $"{LinuxUser}:{LinuxUser}", dataFolder);
 
@@ -106,6 +112,7 @@ public static class ServiceInstaller
             User={LinuxUser}
             Group={LinuxUser}
             Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR={dataFolder}/.runtime
+            # После обновления сервер выходит с кодом 75 — systemd запускает новую версию.
             Restart=on-failure
             RestartSec=5
 
@@ -113,7 +120,8 @@ public static class ServiceInstaller
             WantedBy=multi-user.target
             """);
         Run("systemctl", "daemon-reload");
-        if (Run("systemctl", "enable", "--now", LinuxUnit) != 0)
+        // restart, а не start: при повторной установке поверх работающего сервиса запустится новая версия.
+        if (Run("systemctl", "enable", LinuxUnit) != 0 || Run("systemctl", "restart", LinuxUnit) != 0)
         {
             Console.Error.WriteLine($"Сервис не запустился. Подробности: journalctl -u {LinuxUnit}");
             return 1;

@@ -14,11 +14,15 @@ namespace OfficeChat.Server;
 ///
 ///   --data ПАПКА   где хранить данные      --port ПОРТ   порт HTTPS (45680)
 ///   --name ИМЯ     имя сервера в сети      --no-discovery  не отвечать на поиск в сети
+///   --no-auto-update  не обновляться самому с GitHub (загрузка на странице администратора работает)
 /// </summary>
 public static class Program
 {
     public static async Task<int> Main(string[] args)
     {
+        // Перезапуск после обновления: сначала дождаться, пока старая копия освободит порт и файлы.
+        args = ServerUpdater.WaitForPrevious(args);
+        if (args is [ServerUpdater.ApplyCommand, .. var applyArgs]) return ServerUpdater.Apply(applyArgs);
         var options = new ServerOptions();
         var rest = new List<string>();
         for (var i = 0; i < args.Length; i++)
@@ -38,6 +42,9 @@ public static class Program
                 case "--no-discovery":
                     options.Discovery = false;
                     break;
+                case "--no-auto-update":
+                    options.AutoUpdate = false;
+                    break;
                 default:
                     rest.Add(args[i]);
                     break;
@@ -52,7 +59,10 @@ public static class Program
             {
                 case "run":
                     await ServerApp.Build(options, rest.ToArray()).RunAsync();
-                    return 0;
+                    if (!ServerUpdater.RestartRequested) return 0;
+                    // Обновились: под systemd новая версия встаёт на место здесь, а по коду выхода systemd её запустит.
+                    ServerUpdater.ApplyStaged();
+                    return ServerUpdater.RestartExitCode;
                 case "admin":
                 case "unadmin":
                 case "reset-password":
@@ -99,5 +109,9 @@ public static class Program
           --port ПОРТ            порт HTTPS (по умолчанию 45680)
           --name ИМЯ             имя сервера, которое видят приложения
           --no-discovery         не отвечать на поиск сервера в сети
+          --no-auto-update       не обновляться самому с GitHub
+
+        Обновление: сервер сам раз в 6 часов проверяет выпуски на GitHub. Новую версию можно и загрузить
+        на странице администратора (https://АДРЕС-СЕРВЕРА:45680/admin/). Принимаются только подписанные сборки.
         """);
 }

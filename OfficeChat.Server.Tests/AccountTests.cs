@@ -142,4 +142,23 @@ public class AccountTests
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
         Assert.Contains("OfficeChat", await page.Content.ReadAsStringAsync());
     }
+
+    [Fact]
+    public async Task Server_update_is_admin_only_and_needs_signed_build()
+    {
+        await using var host = await TestHost.StartAsync();
+        var admin = await host.RegisterAsync("fedor");
+        var junk = new ByteArrayContent(new byte[1000]);
+        Assert.Equal(HttpStatusCode.Forbidden, (await admin.Http.PostAsync("/api/admin/server/update", junk)).StatusCode);
+        host.Db.SetAdmin(admin.Id, true);
+
+        var info = await admin.Http.GetFromJsonAsync<AdminServerDto>("/api/admin/server", ServerProtocol.Json);
+        Assert.Equal(OfficeChat.Server.Hosting.ServerUpdater.Platform, info!.Platform);
+
+        // Тесты идут через dotnet, а не из собранного файла: обновлять нечего — и ничего не подменяется.
+        var result = await admin.Http.PostAsync("/api/admin/server/update", new ByteArrayContent(new byte[1000]));
+        var update = await result.Content.ReadFromJsonAsync<OfficeChat.Server.Hosting.UpdateResult>(ServerProtocol.Json);
+        Assert.False(update!.Ok);
+        Assert.False(info.CanUpdate);
+    }
 }

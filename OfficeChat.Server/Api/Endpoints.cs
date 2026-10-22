@@ -73,6 +73,12 @@ public static class Endpoints
         admin.MapPost("/accounts/{id:guid}/reset-password", AdminResetPassword);
         admin.MapPost("/accounts/{id:guid}/block", AdminBlock);
         admin.MapPost("/accounts/{id:guid}/admin", AdminSetAdmin);
+        admin.MapGet("/server", (ServerOptions options, ServerUpdater updater) =>
+            new AdminServerDto(ServerApp.Version, ServerUpdater.Platform, options.AutoUpdate, ServerUpdater.ProgramPath != null,
+                updater.LastCheck));
+        admin.MapPost("/server/update", AdminUpdateServer);
+        admin.MapPost("/server/check", async (ServerUpdater updater, HttpContext ctx) =>
+            await updater.CheckAsync(ctx.RequestAborted));
 
         api.Map("/ws", WebSocketAsync);
     }
@@ -222,6 +228,17 @@ public static class Endpoints
     }
 
     // ---- Администрирование ----
+
+    /// <summary>Новая сборка сервера с компьютера администратора (тело запроса — сам файл).</summary>
+    private static async Task<UpdateResult> AdminUpdateServer(HttpContext ctx, ServerUpdater updater, ILogger<Hub> log)
+    {
+        if (ctx.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+            limit.MaxRequestBodySize = MaxServerBuild;
+        log.LogInformation("{Admin} загружает новую версию сервера", ctx.Account().Login);
+        return await updater.InstallAsync(ctx.Request.Body, ctx.RequestAborted);
+    }
+
+    private const long MaxServerBuild = 512L * 1024 * 1024;
 
     private static IResult AdminResetPassword(Guid id, ServerDb db, Hub hub, ILogger<Hub> log, HttpContext ctx)
     {

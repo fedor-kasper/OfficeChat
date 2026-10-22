@@ -11,6 +11,8 @@ public sealed class ServerOptions
     public string Name { get; set; } = Environment.MachineName;
     /// <summary>Отвечать на поиск сервера в локальной сети (UDP).</summary>
     public bool Discovery { get; set; } = true;
+    /// <summary>Сам проверять выпуски на GitHub и обновляться.</summary>
+    public bool AutoUpdate { get; set; } = true;
 
     public string DatabasePath => Path.Combine(DataFolder, "server.db");
     public string CertificatePath => Path.Combine(DataFolder, "server.pfx");

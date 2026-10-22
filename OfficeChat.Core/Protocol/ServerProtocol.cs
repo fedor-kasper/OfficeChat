@@ -140,6 +140,9 @@ public sealed record FileUploadResponse(Guid Id, long Size);
 public sealed record AdminAccountDto(Guid Id, string Login, string DisplayName, bool IsAdmin, bool IsBlocked,
     DateTimeOffset CreatedAt, DateTimeOffset? LastSeen, int Devices, bool Online);
 
+/// <summary>Сервер для страницы администратора: версия и обновление.</summary>
+public sealed record AdminServerDto(string Version, string Platform, bool AutoUpdate, bool CanUpdate, string LastCheck);
+
 public sealed record ResetPasswordResponse(string TemporaryPassword);
 
 public sealed record BlockRequest(bool Blocked);
