@@ -109,6 +109,15 @@ public sealed class PendingAttachment
     /// </summary>
     public static async Task<List<PendingAttachment>?> FromClipboardAsync(IClipboard clipboard, List<string> errors)
     {
+        // Картинку (скриншот) читаем сами, до Avalonia: она не дочитывает большие данные из буфера X11,
+        // а неудачная попытка ещё и роняет программу-владельца буфера — после этого не прочитать уже никак.
+        if (await Platform.X11Clipboard.TargetsAsync(TimeSpan.FromSeconds(2)) is { } targets &&
+            targets.Contains("image/png") && !targets.Contains("text/uri-list") && !targets.Any(IsText))
+        {
+            if (await Platform.X11Clipboard.ReadAsync("image/png", TimeSpan.FromSeconds(10)) is { Length: > 0 } direct)
+                return Single(FromImageBytes(direct, $"Снимок {DateTime.Now:yyyy-MM-dd HH-mm-ss}.png", out var error), error, errors);
+        }
+
         // Скопированные в файловом менеджере файлы (text/uri-list) — прямым запросом, это самый надёжный путь.
         if (await clipboard.TryGetFilesAsync() is { Length: > 0 } files)
             return FromStorageItems(files, errors);
@@ -132,6 +141,10 @@ public sealed class PendingAttachment
         }
         return null;
     }
+
+    /// <summary>Формат буфера — текст (тогда вставляем текст, как с офисными программами).</summary>
+    private static bool IsText(string target) =>
+        target is "UTF8_STRING" or "STRING" or "TEXT" || target.StartsWith("text/plain", StringComparison.Ordinal);
 
     private static List<PendingAttachment> Single(PendingAttachment? item, string? error, List<string> errors)
     {
