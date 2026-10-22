@@ -141,7 +141,11 @@ public sealed record AdminAccountDto(Guid Id, string Login, string DisplayName, 
     DateTimeOffset CreatedAt, DateTimeOffset? LastSeen, int Devices, bool Online);
 
 /// <summary>Сервер для страницы администратора: версия и обновление.</summary>
-public sealed record AdminServerDto(string Version, string Platform, bool AutoUpdate, bool CanUpdate, string LastCheck);
+public sealed record AdminServerDto(string Version, string Platform, bool AutoUpdate, bool CanUpdate, string LastCheck,
+    bool HasGitHubToken);
+
+/// <summary>Ключ доступа GitHub для обновлений сервера из закрытого репозитория (пустой — убрать).</summary>
+public sealed record GitHubTokenRequest(string? Token);
 
 public sealed record ResetPasswordResponse(string TemporaryPassword);
 

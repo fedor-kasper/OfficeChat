@@ -160,5 +160,14 @@ public class AccountTests
         var update = await result.Content.ReadFromJsonAsync<OfficeChat.Server.Hosting.UpdateResult>(ServerProtocol.Json);
         Assert.False(update!.Ok);
         Assert.False(info.CanUpdate);
+
+        // Ключ GitHub: сохраняется, обратно не отдаётся, убирается.
+        Assert.False(info.HasGitHubToken);
+        await admin.Http.PutAsJsonAsync("/api/admin/server/github-token", new GitHubTokenRequest("github_pat_test"), ServerProtocol.Json);
+        var json = await admin.Http.GetStringAsync("/api/admin/server");
+        Assert.Contains("\"hasGitHubToken\":true", json);
+        Assert.DoesNotContain("github_pat_test", json);
+        await admin.Http.PutAsJsonAsync("/api/admin/server/github-token", new GitHubTokenRequest(""), ServerProtocol.Json);
+        Assert.False((await admin.Http.GetFromJsonAsync<AdminServerDto>("/api/admin/server", ServerProtocol.Json))!.HasGitHubToken);
     }
 }

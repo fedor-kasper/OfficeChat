@@ -163,6 +163,12 @@
         <input type="file" id="server-file" class="hidden">
       </div>
       <div class="status" id="server-status"></div>
+      <label for="github-token">Ключ доступа GitHub (нужен, если репозиторий закрытый)</label>
+      <div class="row" style="margin-top:0">
+        <input id="github-token" type="password" autocomplete="off" style="max-width:420px" placeholder="github_pat_…">
+        <button id="github-token-save">Сохранить</button>
+        <button id="github-token-clear" class="danger hidden">Убрать</button>
+      </div>
     </div>
   </section>
 </main>
@@ -336,6 +342,8 @@ async function loadServer() {
       : info.autoUpdate ? "Обновляется сам: раз в 6 часов проверяет выпуски на GitHub."
       : "Сам не обновляется (параметр --no-auto-update) — загрузите новую версию из файла.");
   $("server-last").textContent = info.lastCheck ? "Последняя проверка: " + info.lastCheck : "";
+  $("github-token").placeholder = info.hasGitHubToken ? "ключ сохранён — введите новый, чтобы заменить" : "github_pat_…";
+  $("github-token-clear").classList.toggle("hidden", !info.hasGitHubToken);
   $("server-check").disabled = $("server-upload").disabled = !info.canUpdate;
   return info;
 }
@@ -374,6 +382,22 @@ $("server-check").addEventListener("click", async () => {
   try { await afterUpdate(await api("POST", "/api/admin/server/check")); }
   catch (e) { serverStatus(e.message, false); }
   finally { $("server-check").disabled = false; }
+});
+
+async function saveGitHubToken(value) {
+  try {
+    await api("PUT", "/api/admin/server/github-token", { token: value });
+    $("github-token").value = "";
+    serverStatus(value ? "Ключ сохранён — нажмите «Проверить обновления на GitHub»" : "Ключ убран", true);
+    await loadServer();
+  } catch (e) { serverStatus(e.message, false); }
+}
+$("github-token-save").addEventListener("click", () => {
+  const value = $("github-token").value.trim();
+  if (value) saveGitHubToken(value);
+});
+$("github-token-clear").addEventListener("click", () => {
+  if (confirm("Убрать ключ доступа GitHub? Сервер перестанет видеть выпуски закрытого репозитория.")) saveGitHubToken("");
 });
 
 $("server-upload").addEventListener("click", () => $("server-file").click());

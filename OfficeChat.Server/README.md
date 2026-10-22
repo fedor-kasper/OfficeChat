@@ -82,6 +82,14 @@ sudo ./officechat-server-linux-x64 install
   на GitHub» или «Загрузить новую версию из файла…» (файл `officechat-server-windows-x64.exe` или
   `officechat-server-linux-x64` из сборки GitHub Actions).
 
+**Закрытый репозиторий.** Без ключа сервер выпуски не увидит. Создайте на GitHub ключ только для чтения:
+Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token;
+Repository access — «Only select repositories» → OfficeChat; Permissions → Repository permissions →
+Contents: «Read-only»; срок — какой удобно (по окончании просто введите новый). Скопируйте ключ
+(`github_pat_…`) в поле «Ключ доступа GitHub» на странице администрирования и нажмите «Сохранить».
+Ключ хранится в папке данных сервера (файл `github-token`), обратно на страницу не отдаётся.
+Вместо этого можно задать переменную окружения `OFFICECHAT_GITHUB_TOKEN`.
+
 Принимается только сборка с цифровой подписью из GitHub Actions (секрет `UPDATE_SIGNING_KEY`) для этой же
 системы и только более новая — подсунуть чужой файл не выйдет. Как перезапускается: служба Windows — новая
 версия сама встаёт на место и запускает службу; Linux — systemd запускает новую версию (код выхода 75);

@@ -75,7 +75,14 @@ public static class Endpoints
         admin.MapPost("/accounts/{id:guid}/admin", AdminSetAdmin);
         admin.MapGet("/server", (ServerOptions options, ServerUpdater updater) =>
             new AdminServerDto(ServerApp.Version, ServerUpdater.Platform, options.AutoUpdate, ServerUpdater.ProgramPath != null,
-                updater.LastCheck));
+                updater.LastCheck, updater.GitHubToken != null));
+        admin.MapPut("/server/github-token", (GitHubTokenRequest request, ServerUpdater updater, ILogger<Hub> log, HttpContext ctx) =>
+        {
+            updater.SetGitHubToken(request.Token);
+            log.LogInformation("{Admin} {Action} ключ доступа GitHub", ctx.Account().Login,
+                string.IsNullOrWhiteSpace(request.Token) ? "убрал(а)" : "задал(а)");
+            return Results.NoContent();
+        });
         admin.MapPost("/server/update", AdminUpdateServer);
         admin.MapPost("/server/check", async (ServerUpdater updater, HttpContext ctx) =>
             await updater.CheckAsync(ctx.RequestAborted));

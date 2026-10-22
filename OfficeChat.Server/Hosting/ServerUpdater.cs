@@ -50,6 +50,45 @@ public sealed class ServerUpdater : BackgroundService
     public static string? ProgramPath =>
         Environment.ProcessPath is { } path && Path.GetFileNameWithoutExtension(path) != "dotnet" ? path : null;
 
+    /// <summary>Ключ доступа GitHub (файл github-token в папке данных или переменная OFFICECHAT_GITHUB_TOKEN).</summary>
+    public string? GitHubToken
+    {
+        get
+        {
+            if (Environment.GetEnvironmentVariable("OFFICECHAT_GITHUB_TOKEN") is { Length: > 0 } fromEnv) return fromEnv.Trim();
+            try
+            {
+                return File.Exists(_options.GitHubTokenPath) && File.ReadAllText(_options.GitHubTokenPath).Trim() is { Length: > 0 } t
+                    ? t
+                    : null;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <summary>Сохранить ключ доступа GitHub (пустой — удалить). Читать его может только сам сервер.</summary>
+    public void SetGitHubToken(string? token)
+    {
+        token = token?.Trim();
+        _checkedAsset = null;
+        if (string.IsNullOrEmpty(token))
+        {
+            File.Delete(_options.GitHubTokenPath);
+            return;
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            File.WriteAllText(_options.GitHubTokenPath, token);
+            return;
+        }
+        File.WriteAllText(_options.GitHubTokenPath, "");
+        File.SetUnixFileMode(_options.GitHubTokenPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        File.WriteAllText(_options.GitHubTokenPath, token);
+    }
+
     /// <summary>Чем закончилась последняя проверка (для страницы администратора).</summary>
     public string LastCheck { get; private set; } = "";
 
@@ -88,9 +127,22 @@ public sealed class ServerUpdater : BackgroundService
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
             http.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("OfficeChat-Server", ServerApp.Version));
-            http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+            // Закрытый репозиторий — только с ключом. При переадресации на хранилище файлов ключ не пересылается.
+            var token = GitHubToken;
+            if (token != null) http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            using var release = JsonDocument.Parse(await http.GetStringAsync(ReleasesUrl, cancel));
+            using var request = new HttpRequestMessage(HttpMethod.Get, ReleasesUrl);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+            using var response = await http.SendAsync(request, cancel);
+            if (response.StatusCode is System.Net.HttpStatusCode.Unauthorized)
+                return Done(UpdateResult.Fail("GitHub не принял ключ доступа — укажите новый"));
+            if (response.StatusCode is System.Net.HttpStatusCode.NotFound)
+                return Done(UpdateResult.Fail(token == null
+                    ? "Выпуск не найден. Если репозиторий закрытый — укажите ключ доступа GitHub"
+                    : "Выпуск не найден (нет ни одного выпуска или у ключа нет доступа к репозиторию)"));
+            response.EnsureSuccessStatusCode();
+
+            using var release = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancel));
             var asset = release.RootElement.GetProperty("assets").EnumerateArray()
                 .FirstOrDefault(a => a.GetProperty("name").GetString() == AssetName);
             if (asset.ValueKind != JsonValueKind.Object)
@@ -98,8 +150,12 @@ public sealed class ServerUpdater : BackgroundService
             var key = $"{asset.GetProperty("id").GetInt64()}:{asset.GetProperty("updated_at").GetString()}";
             if (key == _checkedAsset) return Done(UpdateResult.Fail($"Новее нет (установлена {ServerApp.Version})"));
 
-            var url = asset.GetProperty("browser_download_url").GetString()!;
-            await using var stream = await http.GetStreamAsync(url, cancel);
+            // Файл — через API (работает и для закрытого репозитория).
+            using var download = new HttpRequestMessage(HttpMethod.Get, asset.GetProperty("url").GetString());
+            download.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+            using var file = await http.SendAsync(download, HttpCompletionOption.ResponseHeadersRead, cancel);
+            file.EnsureSuccessStatusCode();
+            await using var stream = await file.Content.ReadAsStreamAsync(cancel);
             var result = await InstallAsync(stream, cancel);
             if (!result.Ok || result.Version == null) _checkedAsset = key;
             return result;

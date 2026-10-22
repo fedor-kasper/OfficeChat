@@ -18,6 +18,8 @@ public sealed class ServerOptions
     public string CertificatePath => Path.Combine(DataFolder, "server.pfx");
     public string FilesFolder => Path.Combine(DataFolder, "files");
     public string LogsFolder => Path.Combine(DataFolder, "logs");
+    /// <summary>Ключ доступа GitHub для обновлений из закрытого репозитория.</summary>
+    public string GitHubTokenPath => Path.Combine(DataFolder, "github-token");
 
     /// <summary>
     /// Windows — %ProgramData%\OfficeChat Server; Linux — /var/lib/officechat-server (служба или root),
