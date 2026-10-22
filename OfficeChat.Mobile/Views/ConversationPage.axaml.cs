@@ -26,9 +26,22 @@ public partial class ConversationPage : Page
     public ConversationPage(Contact contact)
     {
         InitializeComponent();
+        // Внизу переписки — остаёмся внизу, даже когда сообщения становятся выше (догрузились картинки);
+        // прокрутили вверх — не мешаем читать.
+        MessagesScroll.ScrollChanged += (_, e) =>
+        {
+            if (e.ExtentDelta.Y != 0 && _stickToBottom)
+                MessagesScroll.Offset = new Avalonia.Vector(MessagesScroll.Offset.X, double.PositiveInfinity);
+            else if (e.OffsetDelta.Y != 0 || e.ViewportDelta.Y != 0)
+                _stickToBottom = MessagesScroll.Offset.Y >= MessagesScroll.Extent.Height - MessagesScroll.Viewport.Height - 48;
+        };
+        DetachedFromVisualTree += (_, _) =>
+        {
+            _window?.Dispose();
+            _window = null;
+        };
         _contact = contact;
         DataContext = contact;
-        MessagesList.ItemsSource = contact.Messages;
         // Enter на телефоне — новая строка (отправка — кнопкой ➤); списки продолжаются сами, как в Markdown.
         InputBox.TextChanged += (_, _) =>
         {
@@ -41,6 +54,7 @@ public partial class ConversationPage : Page
     }
 
     private string _previousInput = "";
+    private bool _stickToBottom = true;
 
     /// <summary>Набрали перевод строки (ровно один символ «\n») — продолжить или закончить список.</summary>
     private void ContinueList(string before, string after)
@@ -56,8 +70,18 @@ public partial class ConversationPage : Page
         _settingInput = false;
     }
 
+    // Сообщения на экране: при открытии — только последние (большая история открывается быстро).
+    private MessageWindow? _window;
+
     public override void OnAppearing()
     {
+        if (_window == null)
+        {
+            _window = new MessageWindow(_contact);
+            _window.HasMoreChanged += UpdateLoadOlder;
+            MessagesList.ItemsSource = _window.Items;
+        }
+        UpdateLoadOlder();
         MobileSession.Opened(_contact);
         _contact.Messages.CollectionChanged += OnMessagesChanged;
         _contact.PropertyChanged += OnContactChanged;
@@ -117,13 +141,25 @@ public partial class ConversationPage : Page
 
     private void ScrollToEnd()
     {
+        _stickToBottom = true;
         Dispatcher.UIThread.Post(() => MessagesScroll.ScrollToEnd(), DispatcherPriority.Background);
         DispatcherTimer.RunOnce(() => MessagesScroll.ScrollToEnd(), TimeSpan.FromMilliseconds(200));
     }
 
     private void Back_Click(object? sender, RoutedEventArgs e) => Shell.Pop();
 
-    private void LoadOlder_Click(object? sender, RoutedEventArgs e) => MobileSession.Chat?.LoadOlder(_contact);
+    private void UpdateLoadOlder() => LoadOlderButton.IsVisible = _window?.HasMore == true;
+
+    private void LoadOlder_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_window == null || MobileSession.Chat is not { } chat) return;
+        // Подгрузили сверху — то, что было на экране, остаётся на месте.
+        var fromBottom = MessagesScroll.Extent.Height - MessagesScroll.Offset.Y;
+        _stickToBottom = false;
+        _window.ShowMore(chat);
+        MessagesScroll.UpdateLayout();
+        MessagesScroll.Offset = new Avalonia.Vector(0, MessagesScroll.Extent.Height - fromBottom);
+    }
 
     // ---- Отправка ----
 

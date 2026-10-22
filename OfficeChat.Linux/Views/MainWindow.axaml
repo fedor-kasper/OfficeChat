@@ -297,9 +297,8 @@
                 <!-- Отступы — у содержимого, а не у ScrollViewer: иначе «прокрутить до конца» не доходит до низа -->
                 <ScrollViewer x:Name="MessagesScroll">
                     <StackPanel Margin="14,8">
-                        <Button Content="Показать более ранние сообщения" HorizontalAlignment="Center"
-                                Margin="0,4,0,8" Padding="10,3" FontSize="12" Click="LoadOlder_Click"
-                                IsVisible="{Binding HasOlderMessages}" />
+                        <Button x:Name="LoadOlderButton" Content="Показать более ранние сообщения" HorizontalAlignment="Center"
+                                Margin="0,4,0,8" Padding="10,3" FontSize="12" Click="LoadOlder_Click" IsVisible="False" />
                         <ItemsControl x:Name="MessagesList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>

@@ -23,6 +23,8 @@ public partial class MainWindow : Window
     private readonly UpdateService _updates;
     private readonly ReminderService _reminders;
     private Contact? _current;
+    // Какие сообщения открытой переписки на экране (последние; раньше — по «Показать более ранние»).
+    private MessageWindow? _window;
     // Изображения, выбранные для отправки (полоса над полем ввода).
     private readonly ObservableCollection<PendingAttachment> _attachments = new();
     private bool _exiting;
@@ -281,6 +283,8 @@ public partial class MainWindow : Window
             _current.Messages.CollectionChanged -= OnCurrentMessagesChanged;
             _current.PropertyChanged -= OnCurrentContactChanged;
         }
+        _window?.Dispose();
+        _window = null;
 
         CancelCompose();
         _current = ContactsList.SelectedItem as Contact;
@@ -303,7 +307,11 @@ public partial class MainWindow : Window
 
         ChatPanel.Visibility = Visibility.Visible;
         ChatPanel.DataContext = _current;
-        MessagesList.ItemsSource = _current.Messages;
+        // На экране — только последние сообщения: переписка с большой историей открывается сразу.
+        _window = new MessageWindow(_current);
+        _window.HasMoreChanged += UpdateLoadOlder;
+        MessagesList.ItemsSource = _window.Items;
+        UpdateLoadOlder();
 
         UpdateChatHeader();
         UpdateMessagesHint();
@@ -877,6 +885,8 @@ public partial class MainWindow : Window
                 : "Исходное сообщение удалено.");
             return;
         }
+        _window?.Reveal(original);
+        MessagesList.UpdateLayout();
         (MessagesList.ItemContainerGenerator.ContainerFromItem(original) as FrameworkElement)?.BringIntoView();
     }
 
@@ -1032,13 +1042,16 @@ public partial class MainWindow : Window
 
     // ---- История и управление контактами ----
 
+    private void UpdateLoadOlder() =>
+        LoadOlderButton.Visibility = _window?.HasMore == true ? Visibility.Visible : Visibility.Collapsed;
+
     private void LoadOlder_Click(object sender, RoutedEventArgs e)
     {
         if (_current == null) return;
 
         // Сохраняем позицию, чтобы после вставки сверху остаться на том же сообщении.
         var distanceFromBottom = MessagesScroll.ExtentHeight - MessagesScroll.VerticalOffset;
-        _chat.LoadOlder(_current);
+        _window?.ShowMore(_chat);
         MessagesScroll.UpdateLayout();
         MessagesScroll.ScrollToVerticalOffset(MessagesScroll.ExtentHeight - distanceFromBottom);
     }

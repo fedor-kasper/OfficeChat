@@ -14,19 +14,34 @@ public sealed class ImageThumbnailConverter : IValueConverter
     private static readonly Queue<string> CacheOrder = new();
     private const int CacheSize = 150;
 
+    // Файлы меньше этого — стикеры и значки: их проще прочитать целиком.
+    private const int SmallFileBytes = 160 * 1024;
+
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is not string path || path.Length == 0) return null;
-        var key = $"{DecodeWidth}|{path}";
-        if (Cache.TryGetValue(key, out var cached)) return cached;
-
+        if (TryGetCached(path, DecodeWidth) is { } cached) return cached;
         var image = Load(path, DecodeWidth);
-        if (image == null) return null;
-        Cache[key] = image;
-        CacheOrder.Enqueue(key);
-        while (CacheOrder.Count > CacheSize)
-            Cache.Remove(CacheOrder.Dequeue());
+        if (image != null) Remember(path, DecodeWidth, image);
         return image;
+    }
+
+    /// <summary>Уже загруженная миниатюра (без чтения диска) — или null.</summary>
+    public static Bitmap? TryGetCached(string path, int decodeWidth)
+    {
+        lock (Cache) return Cache.GetValueOrDefault($"{decodeWidth}|{path}");
+    }
+
+    public static void Remember(string path, int decodeWidth, Bitmap image)
+    {
+        var key = $"{decodeWidth}|{path}";
+        lock (Cache)
+        {
+            if (!Cache.TryAdd(key, image)) return;
+            CacheOrder.Enqueue(key);
+            while (CacheOrder.Count > CacheSize)
+                Cache.Remove(CacheOrder.Dequeue());
+        }
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
@@ -50,8 +65,12 @@ public sealed class ImageThumbnailConverter : IValueConverter
     {
         try
         {
+            // Большой файл — это фото или снимок экрана: сразу уменьшенное (без декодирования в полном размере —
+            // это и было медленным при открытии переписки с картинками). Маленький (стикер, значок) — как есть,
+            // а уменьшаем, только если он всё-таки шире нужного.
+            if (decodeWidth > 0 && data.Length > SmallFileBytes)
+                return Bitmap.DecodeToWidth(new MemoryStream(data), decodeWidth, BitmapInterpolationMode.HighQuality);
             var full = new Bitmap(new MemoryStream(data));
-            // Маленькие изображения не растягиваем: уменьшаем только то, что шире нужного.
             if (decodeWidth <= 0 || full.PixelSize.Width <= decodeWidth) return full;
             full.Dispose();
             return Bitmap.DecodeToWidth(new MemoryStream(data), decodeWidth, BitmapInterpolationMode.HighQuality);

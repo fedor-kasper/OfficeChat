@@ -6,7 +6,6 @@
     <m:Page.Resources>
         <m:AvatarBrushConverter x:Key="AvatarBrush" />
         <m:InitialConverter x:Key="Initial" />
-        <v:ImageThumbnailConverter x:Key="Thumbnail" />
 
         <!-- Содержимое пузыря: автор (в группе), цитата, изображение, файл, текст, время и статус -->
         <DataTemplate x:Key="MessageBody">
@@ -23,8 +22,10 @@
                     </StackPanel>
                 </Border>
                 <Button IsVisible="{Binding IsImage}" Classes="plain" Padding="0" Click="Image_Click">
-                    <Image Source="{Binding ImagePath, Converter={StaticResource Thumbnail}}" MaxWidth="260" MaxHeight="300"
-                           Stretch="Uniform" />
+                    <!-- Картинка декодируется в фоне; до этого — место под неё, чтобы переписка не прыгала -->
+                    <Panel MinWidth="120" MinHeight="90">
+                        <m:LazyImage Path="{Binding ImagePath}" MaxWidth="260" MaxHeight="300" Stretch="Uniform" />
+                    </Panel>
                 </Button>
                 <Button IsVisible="{Binding IsFile}" Classes="plain" Padding="0" Click="File_Click"
                         HorizontalContentAlignment="Left">
@@ -113,7 +114,7 @@
         <ScrollViewer x:Name="MessagesScroll" Background="White">
             <StackPanel Margin="8,8,8,12">
                 <Button x:Name="LoadOlderButton" Content="Показать раньше" HorizontalAlignment="Center" Margin="0,0,0,8"
-                        IsVisible="{Binding HasOlderMessages}" Click="LoadOlder_Click" />
+                        IsVisible="False" Click="LoadOlder_Click" />
                 <ItemsControl x:Name="MessagesList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>

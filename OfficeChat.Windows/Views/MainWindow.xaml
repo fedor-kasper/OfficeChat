@@ -392,9 +392,8 @@
             <Grid>
                 <ScrollViewer x:Name="MessagesScroll" VerticalScrollBarVisibility="Auto" Padding="14,8">
                     <StackPanel>
-                        <Button Content="Показать более ранние сообщения" HorizontalAlignment="Center"
-                                Margin="0,4,0,8" Padding="10,2" Click="LoadOlder_Click"
-                                Visibility="{Binding HasOlderMessages, Converter={StaticResource BoolToVisibility}}" />
+                        <Button x:Name="LoadOlderButton" Content="Показать более ранние сообщения" HorizontalAlignment="Center"
+                                Margin="0,4,0,8" Padding="10,2" Click="LoadOlder_Click" Visibility="Collapsed" />
                         <ItemsControl x:Name="MessagesList" ItemTemplate="{StaticResource MessageTemplate}" />
                     </StackPanel>
                 </ScrollViewer>
