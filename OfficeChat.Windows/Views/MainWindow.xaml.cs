@@ -22,6 +22,9 @@ public partial class MainWindow : Window
     private readonly GameService _games;
     private readonly UpdateService _updates;
     private readonly ReminderService _reminders;
+    private readonly CashService _cash;
+    // Выбор поставщика сам снимает выбор переписки — доску напоминаний тогда не показываем.
+    private bool _openingSupplier;
     private Contact? _current;
     // Какие сообщения открытой переписки на экране (последние; раньше — по «Показать более ранние»).
     private MessageWindow? _window;
@@ -118,6 +121,13 @@ public partial class MainWindow : Window
         RemindersView.Attach(_reminders, () => _chat.People);
         _reminders.Start();
         UpdateRemindersButton();
+
+        _cash = new CashService(settings);
+        CashView.Attach(_cash);
+        CashView.Closed += ShowReminders;
+        _cash.Changed += UpdateCashSidebar;
+        _cash.PeersChanged += UpdateCashSidebar;
+        ApplyCashMode();
 
         // Обновление ставится, только когда окно свёрнуто в трей и ничего не прервётся.
         _updates = new UpdateService(_chat,
@@ -294,13 +304,16 @@ public partial class MainWindow : Window
 
         if (_current == null)
         {
-            // Переписка не выбрана — на её месте доска напоминаний.
+            // Переписка не выбрана — на её месте доска напоминаний (или поставщик в режиме «Касса»).
             ChatPanel.Visibility = Visibility.Collapsed;
+            if (_openingSupplier) return;
             RemindersView.Visibility = Visibility.Visible;
             RemindersView.Refresh();
             return;
         }
         RemindersView.Visibility = Visibility.Collapsed;
+        CashView.Visibility = Visibility.Collapsed;
+        SuppliersList.SelectedItem = null;
 
         _current.Messages.CollectionChanged += OnCurrentMessagesChanged;
         _current.PropertyChanged += OnCurrentContactChanged;
@@ -918,6 +931,9 @@ public partial class MainWindow : Window
         var settings = new MenuItem { Header = "Имя и автозапуск…" };
         settings.Click += Settings_Click;
         menu.Items.Add(settings);
+        var cash = new MenuItem { Header = _settings.CashMode ? "Режим «Касса» (включён)…" : "Режим «Касса»…" };
+        cash.Click += CashSettings_Click;
+        menu.Items.Add(cash);
         if (_account != null)
         {
             menu.Items.Add(new Separator());
@@ -1083,8 +1099,96 @@ public partial class MainWindow : Window
         ShowFromTray();
         RemindersView.Visibility = Visibility.Visible;
         ContactsList.SelectedItem = null;
+        SuppliersList.SelectedItem = null;
+        CashView.Visibility = Visibility.Collapsed;
         ChatPanel.Visibility = Visibility.Collapsed;
         RemindersView.Refresh();
+    }
+
+    // ---- Режим «Касса» ----
+
+    private void ApplyCashMode()
+    {
+        var on = _settings.CashMode;
+        CashSidebar.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        // Слева ещё колонка поставщиков — окну нужно больше места.
+        MinWidth = on ? 1040 : 780;
+        if (Width < MinWidth) Width = MinWidth;
+        if (on) _cash.Start();
+        else
+        {
+            _cash.Stop();
+            if (CashView.IsVisible) ShowReminders();
+        }
+        UpdateCashSidebar();
+    }
+
+    private void UpdateCashSidebar()
+    {
+        if (!_settings.CashMode) return;
+        CashTotalText.Text = $"У поставщиков на балансе: {Money.Format(_cash.Total)}";
+        var peers = _cash.Peers;
+        CashSyncText.Text = !_cash.IsSyncing
+            ? "Только этот компьютер (код кассы не задан)"
+            : peers.Count == 0
+                ? "Других компьютеров кассы в сети нет — записи уйдут, когда они появятся"
+                : string.Join(", ", peers.Select(p => p.Machine + (p.InSync ? " ✓" : " …"))) +
+                  (peers.All(p => p.InSync) ? " — всё совпадает" : " — синхронизация…");
+
+        // Без поиска — сам список службы (обновляется сам), с поиском — отобранные заново.
+        var filter = SupplierFilter.Text.Trim();
+        if (filter.Length > 0 || !ReferenceEquals(SuppliersList.ItemsSource, _cash.Suppliers))
+        {
+            var selected = SuppliersList.SelectedItem as Supplier;
+            var source = filter.Length == 0
+                ? (IList<Supplier>)_cash.Suppliers
+                : _cash.Suppliers.Where(s => s.Name.Contains(filter, StringComparison.CurrentCultureIgnoreCase)).ToList();
+            _openingSupplier = true;
+            SuppliersList.ItemsSource = source;
+            if (selected != null && source.Contains(selected)) SuppliersList.SelectedItem = selected;
+            _openingSupplier = false;
+        }
+        // Поставщика убрали на другом компьютере — закрываем его.
+        if (CashView.IsVisible && CashView.Current is { } current && !_cash.Suppliers.Contains(current)) ShowReminders();
+    }
+
+    private void SupplierFilter_TextChanged(object sender, TextChangedEventArgs e) => UpdateCashSidebar();
+
+    private void SuppliersList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_openingSupplier || SuppliersList.SelectedItem is not Supplier supplier) return;
+        _openingSupplier = true;
+        ContactsList.SelectedItem = null;
+        _openingSupplier = false;
+        RemindersView.Visibility = Visibility.Collapsed;
+        ChatPanel.Visibility = Visibility.Collapsed;
+        CashView.Visibility = Visibility.Visible;
+        CashView.Show(supplier);
+    }
+
+    private void AddSupplier_Click(object sender, RoutedEventArgs e)
+    {
+        var name = CashDialogs.Input(this, "Новый поставщик", "Название поставщика (как в накладной):", "", "Добавить", required: true);
+        if (name == null) return;
+        if (_cash.Suppliers.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.CurrentCultureIgnoreCase)) is { } existing &&
+            MessageBox.Show(this, $"Поставщик «{existing.Name}» уже есть. Всё равно добавить ещё одного с таким названием?",
+                "Касса", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+        {
+            SuppliersList.SelectedItem = existing;
+            return;
+        }
+        SupplierFilter.Text = "";
+        SuppliersList.SelectedItem = _cash.AddSupplier(name);
+    }
+
+    private void CashSettings_Click(object sender, RoutedEventArgs e)
+    {
+        var status = _cash.IsSyncing ? $"Сейчас: {CashSyncText.Text}" : "";
+        if (CashDialogs.Settings(this, _settings.CashMode, _settings.CashCode, status) is not { } result) return;
+        _settings.CashMode = result.Enabled;
+        _settings.CashCode = result.Code;
+        SettingsService.Save(_settings);
+        ApplyCashMode();
     }
 
     private void RemindAbout_Click(object sender, RoutedEventArgs e)
@@ -1231,6 +1335,7 @@ public partial class MainWindow : Window
     {
         _updates.Dispose();
         _reminders.Dispose();
+        _cash.Dispose();
         _games.LeaveAll();
         _games.Dispose();
         _notifications.CloseAll();

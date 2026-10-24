@@ -249,7 +249,7 @@ public sealed class DiscoveryService : IDisposable
     /// Общий broadcast 255.255.255.255 плюс адрес broadcast каждой активной сетевой карты —
     /// на Windows с несколькими адаптерами общий broadcast уходит только через один из них.
     /// </summary>
-    private static IEnumerable<IPAddress> GetBroadcastAddresses()
+    internal static IEnumerable<IPAddress> GetBroadcastAddresses()
     {
         var result = new HashSet<IPAddress> { IPAddress.Broadcast };
         try

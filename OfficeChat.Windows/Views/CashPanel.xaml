@@ -1,0 +1,144 @@
+<UserControl x:Class="OfficeChat.Views.CashPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <Style x:Key="Tab" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontSize" Value="13" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+        <Style x:Key="Label" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+        <Style x:Key="Amount" TargetType="TextBox">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Padding" Value="4,3" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel>
+        <!-- Поставщик и его баланс -->
+        <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="Переименовать" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Rename_Click" />
+                    <Button x:Name="RemoveButton" Content="Убрать из списка" Padding="8,3" FontSize="12" Click="Remove_Click" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock x:Name="NameText" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="BalanceHint" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Новая запись -->
+        <Border DockPanel.Dock="Top" Padding="16,12" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1" Background="#FAFBFC">
+            <StackPanel>
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+                        <TextBlock Text="Баланс" FontSize="11" HorizontalAlignment="Right" Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock x:Name="BalanceText" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="DeliveryTab" Content="🚚 Поставка" Style="{StaticResource Tab}" Tag="Delivery" Click="Tab_Click" />
+                        <Button x:Name="ReturnTab" Content="↩ Возврат товара" Style="{StaticResource Tab}" Tag="Return" Click="Tab_Click" />
+                        <Button x:Name="PayoutTab" Content="💰 Погашение" Style="{StaticResource Tab}" Tag="Payout" Click="Tab_Click" />
+                    </StackPanel>
+                </DockPanel>
+
+                <TextBlock x:Name="TabHint" FontSize="12" Margin="0,8,0,8" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+                <!-- Поставка: по накладной и сколько выдали -->
+                <WrapPanel x:Name="DeliveryFields">
+                    <StackPanel Margin="0,0,14,0" Width="170">
+                        <TextBlock Style="{StaticResource Label}" Text="По накладной, ₽" />
+                        <TextBox x:Name="DueBox" Style="{StaticResource Amount}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,14,0" Width="170">
+                        <TextBlock Style="{StaticResource Label}" Text="Выдано водителю, ₽" />
+                        <TextBox x:Name="PaidBox" Style="{StaticResource Amount}" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Bottom" Orientation="Horizontal" Margin="0,0,0,3">
+                        <TextBlock Text="Округлить:" FontSize="12" VerticalAlignment="Center" Margin="0,0,4,0"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                        <Button Content="до 10" Padding="6,2" FontSize="12" Margin="0,0,4,0" Tag="1000" Click="RoundUp_Click" />
+                        <Button Content="до 50" Padding="6,2" FontSize="12" Margin="0,0,4,0" Tag="5000" Click="RoundUp_Click" />
+                        <Button Content="до 100" Padding="6,2" FontSize="12" Tag="10000" Click="RoundUp_Click" />
+                    </StackPanel>
+                </WrapPanel>
+
+                <!-- Возврат и погашение: одна сумма -->
+                <StackPanel x:Name="AmountFields" Width="170" HorizontalAlignment="Left" Visibility="Collapsed">
+                    <TextBlock x:Name="AmountLabel" Style="{StaticResource Label}" Text="Сумма, ₽" />
+                    <TextBox x:Name="AmountBox" Style="{StaticResource Amount}" />
+                </StackPanel>
+
+                <TextBlock Style="{StaticResource Label}" Margin="0,10,0,3" Text="Комментарий (накладная, водитель…) — необязательно" />
+                <TextBox x:Name="CommentBox" MaxLength="500" Padding="4,3" />
+
+                <DockPanel Margin="0,10,0,0">
+                    <Button x:Name="RecordButton" DockPanel.Dock="Right" Content="Записать" Padding="18,6" FontSize="14"
+                            Style="{StaticResource FlatButton}" Click="Record_Click" />
+                    <TextBlock x:Name="PreviewText" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- История поставщика: сначала новые -->
+        <Grid>
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="History" Margin="14,8">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border x:Name="Card" Margin="0,3" Padding="12,8" CornerRadius="8" Background="#F6F7F9"
+                                    BorderBrush="#E2E5EA" BorderThickness="1">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0" HorizontalAlignment="Right">
+                                        <TextBlock x:Name="Delta" Text="{Binding DeltaText}" FontSize="16" FontWeight="SemiBold"
+                                                   HorizontalAlignment="Right" Foreground="#374151" />
+                                        <TextBlock Text="{Binding BalanceAfterText}" FontSize="11" HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                        <Button x:Name="CancelButton" Content="Отменить…" Padding="8,1" FontSize="11" Margin="0,4,0,0"
+                                                HorizontalAlignment="Right" Click="CancelEntry_Click" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <TextBlock x:Name="TitleText" Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" />
+                                        <TextBlock x:Name="DetailsText" Text="{Binding Details}" FontSize="13" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Comment}" FontSize="12" TextWrapping="Wrap" FontStyle="Italic"
+                                                   Visibility="{Binding HasComment, Converter={StaticResource BoolToVisibility}}" />
+                                        <TextBlock Text="{Binding AuthorLine}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding CancelLine}" FontSize="11" Foreground="#B91C1C" TextWrapping="Wrap"
+                                                   Visibility="{Binding IsCancelled, Converter={StaticResource BoolToVisibility}}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsPositive}" Value="True">
+                                    <Setter TargetName="Delta" Property="Foreground" Value="#15803D" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsNegative}" Value="True">
+                                    <Setter TargetName="Delta" Property="Foreground" Value="#B91C1C" />
+                                </DataTrigger>
+                                <!-- Отменённая: бледная и зачёркнутая, отменить ещё раз нельзя -->
+                                <DataTrigger Binding="{Binding IsCancelled}" Value="True">
+                                    <Setter TargetName="Card" Property="Opacity" Value="0.55" />
+                                    <Setter TargetName="Delta" Property="TextDecorations" Value="Strikethrough" />
+                                    <Setter TargetName="TitleText" Property="TextDecorations" Value="Strikethrough" />
+                                    <Setter TargetName="DetailsText" Property="TextDecorations" Value="Strikethrough" />
+                                    <Setter TargetName="CancelButton" Property="Visibility" Value="Collapsed" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock x:Name="EmptyText" Text="Записей пока нет" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}" IsHitTestVisible="False" />
+        </Grid>
+    </DockPanel>
+</UserControl>

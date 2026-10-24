@@ -1,0 +1,143 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="OfficeChat.Views.CashPanel">
+    <UserControl.Styles>
+        <Style Selector="Button.tab">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="FontSize" Value="13" />
+        </Style>
+        <Style Selector="Button.tab.selected">
+            <Setter Property="Background" Value="#DBEAFE" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
+        <Style Selector="TextBlock.delta">
+            <Setter Property="Foreground" Value="#374151" />
+        </Style>
+        <Style Selector="TextBlock.delta.positive">
+            <Setter Property="Foreground" Value="#15803D" />
+        </Style>
+        <Style Selector="TextBlock.delta.negative">
+            <Setter Property="Foreground" Value="#B91C1C" />
+        </Style>
+        <Style Selector="Border.entry.cancelled">
+            <Setter Property="Opacity" Value="0.55" />
+        </Style>
+        <Style Selector="Border.entry.cancelled TextBlock.strike">
+            <Setter Property="TextDecorations" Value="Strikethrough" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,0,0,3" />
+        </Style>
+    </UserControl.Styles>
+
+    <DockPanel>
+        <!-- Поставщик и его баланс -->
+        <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Content="Переименовать" Padding="8,3" FontSize="12" Click="Rename_Click" />
+                    <Button x:Name="RemoveButton" Content="Убрать из списка" Padding="8,3" FontSize="12" Click="Remove_Click" />
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock x:Name="NameText" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="BalanceHint" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Новая запись -->
+        <Border DockPanel.Dock="Top" Padding="16,12" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1"
+                Background="#FAFBFC">
+            <StackPanel Spacing="10">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
+                        <TextBlock Text="Баланс" FontSize="11" HorizontalAlignment="Right" Foreground="{StaticResource MutedTextBrush}" />
+                        <TextBlock x:Name="BalanceText" FontSize="22" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <Button x:Name="DeliveryTab" Content="🚚 Поставка" Classes="tab selected" Click="Tab_Click" Tag="Delivery" />
+                        <Button x:Name="ReturnTab" Content="↩ Возврат товара" Classes="tab" Click="Tab_Click" Tag="Return" />
+                        <Button x:Name="PayoutTab" Content="💰 Погашение" Classes="tab" Click="Tab_Click" Tag="Payout" />
+                    </StackPanel>
+                </DockPanel>
+
+                <TextBlock x:Name="TabHint" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+
+                <!-- Поставка: по накладной и сколько выдали -->
+                <WrapPanel x:Name="DeliveryFields">
+                    <StackPanel Margin="0,0,14,0" Width="170">
+                        <TextBlock Classes="label" Text="По накладной, ₽" />
+                        <TextBox x:Name="DueBox" FontSize="16" Watermark="672,34" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,14,0" Width="170">
+                        <TextBlock Classes="label" Text="Выдано водителю, ₽" />
+                        <TextBox x:Name="PaidBox" FontSize="16" Watermark="700" />
+                    </StackPanel>
+                    <StackPanel VerticalAlignment="Bottom" Orientation="Horizontal" Spacing="4" Margin="0,0,0,2">
+                        <TextBlock Text="Округлить:" FontSize="12" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                        <Button Content="до 10" Padding="6,2" FontSize="12" Tag="1000" Click="RoundUp_Click" />
+                        <Button Content="до 50" Padding="6,2" FontSize="12" Tag="5000" Click="RoundUp_Click" />
+                        <Button Content="до 100" Padding="6,2" FontSize="12" Tag="10000" Click="RoundUp_Click" />
+                    </StackPanel>
+                </WrapPanel>
+
+                <!-- Возврат и погашение: одна сумма -->
+                <StackPanel x:Name="AmountFields" Width="170" HorizontalAlignment="Left" IsVisible="False">
+                    <TextBlock x:Name="AmountLabel" Classes="label" Text="Сумма, ₽" />
+                    <TextBox x:Name="AmountBox" FontSize="16" />
+                </StackPanel>
+
+                <StackPanel>
+                    <TextBlock Classes="label" Text="Комментарий (накладная, водитель…) — необязательно" />
+                    <TextBox x:Name="CommentBox" MaxLength="500" />
+                </StackPanel>
+
+                <DockPanel>
+                    <Button x:Name="RecordButton" DockPanel.Dock="Right" Content="Записать" Padding="18,6" FontSize="14"
+                            Classes="flat" Click="Record_Click" />
+                    <TextBlock x:Name="PreviewText" FontSize="14" VerticalAlignment="Center" TextWrapping="Wrap" />
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- История поставщика: сначала новые -->
+        <Panel>
+            <ScrollViewer>
+                <ItemsControl x:Name="History" Margin="14,8">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Classes="entry" Classes.cancelled="{Binding IsCancelled}" Margin="0,3" Padding="12,8"
+                                    CornerRadius="8" Background="#F6F7F9" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0" HorizontalAlignment="Right">
+                                        <TextBlock Text="{Binding DeltaText}" FontSize="16" FontWeight="SemiBold" HorizontalAlignment="Right"
+                                                   Classes="delta strike" Classes.positive="{Binding IsPositive}"
+                                                   Classes.negative="{Binding IsNegative}" />
+                                        <TextBlock Text="{Binding BalanceAfterText}" FontSize="11" HorizontalAlignment="Right"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                        <Button Content="Отменить…" Padding="8,1" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Right"
+                                                IsVisible="{Binding !IsCancelled}" Click="CancelEntry_Click" />
+                                    </StackPanel>
+                                    <StackPanel Spacing="1">
+                                        <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" Classes="strike" />
+                                        <TextBlock Text="{Binding Details}" FontSize="13" TextWrapping="Wrap" Classes="strike" />
+                                        <TextBlock Text="{Binding Comment}" FontSize="12" TextWrapping="Wrap" FontStyle="Italic"
+                                                   IsVisible="{Binding HasComment}" />
+                                        <TextBlock Text="{Binding AuthorLine}" FontSize="11" Foreground="{StaticResource MutedTextBrush}" />
+                                        <TextBlock Text="{Binding CancelLine}" FontSize="11" Foreground="#B91C1C" TextWrapping="Wrap"
+                                                   IsVisible="{Binding IsCancelled}" />
+                                    </StackPanel>
+                                </DockPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+            <TextBlock x:Name="EmptyText" Text="Записей пока нет" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}" IsHitTestVisible="False" />
+        </Panel>
+    </DockPanel>
+</UserControl>

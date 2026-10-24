@@ -153,12 +153,58 @@
 
     <Grid>
         <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="260" />
             <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
+        <!-- Режим «Касса»: поставщики и их баланс — левее списка переписок -->
+        <Border x:Name="CashSidebar" Grid.Column="0" Width="250" Visibility="Collapsed" Background="#EEF2F7"
+                BorderBrush="#E2E5EA" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <Border DockPanel.Dock="Top" Padding="14,12" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
+                    <StackPanel>
+                        <TextBlock Text="💰 Касса" FontSize="15" FontWeight="SemiBold" />
+                        <TextBlock x:Name="CashTotalText" FontSize="12" Margin="0,2,0,0" TextWrapping="Wrap" />
+                        <TextBlock x:Name="CashSyncText" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}" />
+                    </StackPanel>
+                </Border>
+                <DockPanel DockPanel.Dock="Top" Margin="14,8,10,4">
+                    <Button DockPanel.Dock="Right" Content="＋ Поставщик" Padding="8,1" FontSize="12" Click="AddSupplier_Click" />
+                    <TextBlock Text="ПОСТАВЩИКИ" FontSize="11" VerticalAlignment="Center" Foreground="{StaticResource MutedTextBrush}" />
+                </DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="10,2,10,4">
+                    <TextBlock DockPanel.Dock="Left" Text="🔍" FontSize="12" VerticalAlignment="Center" Margin="2,0,6,0"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                    <TextBox x:Name="SupplierFilter" FontSize="12" Padding="3,2" ToolTip="Поиск поставщика"
+                             TextChanged="SupplierFilter_TextChanged" />
+                </DockPanel>
+                <ListBox x:Name="SuppliersList" BorderThickness="0" Background="Transparent" HorizontalContentAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" SelectionChanged="SuppliersList_SelectionChanged">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="6,6">
+                                <TextBlock x:Name="Balance" DockPanel.Dock="Right" Text="{Binding BalanceText}" FontSize="13"
+                                           FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#374151" />
+                                <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <DataTemplate.Triggers>
+                                <DataTrigger Binding="{Binding IsPositive}" Value="True">
+                                    <Setter TargetName="Balance" Property="Foreground" Value="#15803D" />
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding IsNegative}" Value="True">
+                                    <Setter TargetName="Balance" Property="Foreground" Value="#B91C1C" />
+                                </DataTrigger>
+                            </DataTemplate.Triggers>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
         <!-- Левая панель: я + список компьютеров -->
-        <DockPanel Grid.Column="0" Background="{StaticResource SidebarBrush}">
+        <DockPanel Grid.Column="1" Background="{StaticResource SidebarBrush}">
             <Border DockPanel.Dock="Top" Padding="14,12" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <Button x:Name="MenuButton" DockPanel.Dock="Right" Content="Настройки ▾" Padding="8,2"
@@ -268,11 +314,14 @@
         </DockPanel>
 
         <!-- Правая часть: доска напоминаний — видна, когда не открыта ни одна переписка -->
-        <local:RemindersPanel x:Name="RemindersView" Grid.Column="1" />
+        <local:RemindersPanel x:Name="RemindersView" Grid.Column="2" />
+
+        <!-- Правая часть: поставщик (режим «Касса») -->
+        <local:CashPanel x:Name="CashView" Grid.Column="2" Visibility="Collapsed" />
 
 
         <!-- Правая часть: переписка -->
-        <DockPanel x:Name="ChatPanel" Grid.Column="1" Visibility="Collapsed" AllowDrop="True"
+        <DockPanel x:Name="ChatPanel" Grid.Column="2" Visibility="Collapsed" AllowDrop="True"
                    PreviewDragEnter="ChatPanel_PreviewDragOver" PreviewDragOver="ChatPanel_PreviewDragOver"
                    PreviewDragLeave="ChatPanel_PreviewDragLeave" PreviewDrop="ChatPanel_PreviewDrop">
             <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">

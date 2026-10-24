@@ -31,6 +31,15 @@ public sealed class AppSettings
 
     /// <summary>Перенести переписку без аккаунта уже предлагали (в настройках аккаунта) — больше не спрашиваем.</summary>
     public bool LegacyOffered { get; set; }
+
+    /// <summary>Режим «Касса»: слева список поставщиков с балансом.</summary>
+    public bool CashMode { get; set; }
+
+    /// <summary>Код кассы: компьютеры с одинаковым кодом ведут общий журнал (по сети, без сервера).</summary>
+    public string CashCode { get; set; } = "";
+
+    /// <summary>Этот компьютер в журнале кассы (у каждой копии программы свой).</summary>
+    public Guid CashDeviceId { get; set; } = Guid.NewGuid();
 }
 
 /// <summary>
