@@ -15,7 +15,11 @@ public static class CashDialogs
         string? result = null;
         var window = NewWindow(owner, title, 420);
         var box = new TextBox { Text = initial, MaxLength = 500, Padding = new Thickness(4, 3, 4, 3), Margin = new Thickness(0, 10, 0, 0) };
-        var (buttons, ok) = Buttons(okText, window, () => result = box.Text.Trim());
+        var (buttons, ok) = Buttons(okText, window, () =>
+        {
+            result = box.Text.Trim();
+            return true;
+        });
         void Update() => ok.IsEnabled = !required || !string.IsNullOrWhiteSpace(box.Text);
         box.TextChanged += (_, _) => Update();
         Update();
@@ -44,7 +48,11 @@ public static class CashDialogs
         };
         var enable = new CheckBox { Content = "Включить режим «Касса»", IsChecked = enabled, FontSize = 14 };
         var codeBox = new TextBox { Text = code, MaxLength = 100, Padding = new Thickness(4, 3, 4, 3), Margin = new Thickness(0, 4, 0, 0) };
-        var (buttons, _) = Buttons("Сохранить", window, () => result = (enable.IsChecked == true, codeBox.Text.Trim()));
+        var (buttons, _) = Buttons("Сохранить", window, () =>
+        {
+            result = (enable.IsChecked == true, codeBox.Text.Trim());
+            return true;
+        });
         var panel = new StackPanel
         {
             Margin = new Thickness(20),
@@ -82,17 +90,8 @@ public static class CashDialogs
         var sinceBox = new TextBox { Text = since.ToString("dd.MM.yyyy"), Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
         var balanceBox = new TextBox { Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
         var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        // «Сохранить» — своя кнопка: окно закрывается, только если всё введено верно.
-        var (buttons, _) = Buttons("Сохранить", window, () => { });
-        var save = new Button { Content = "Сохранить", MinWidth = 100, Padding = new Thickness(10, 4, 10, 4), IsDefault = true };
-        buttons.Children[0] = save;
-        var off = new Button
-        {
-            Content = "Отключить", MinWidth = 90, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 8, 0),
-            Visibility = linked ? Visibility.Visible : Visibility.Collapsed,
-        };
-        buttons.Children.Insert(0, off);
-        save.Click += (_, _) =>
+        // «Сохранить» закрывает окно, только если всё введено верно.
+        var (buttons, _) = Buttons("Сохранить", window, () =>
         {
             var name = loginBox.Text.Trim();
             long? balance = null;
@@ -107,9 +106,16 @@ public static class CashDialogs
             else
             {
                 result = new SiteLinkResult(name, passwordBox.Password, date, balance);
-                window.Close();
+                return true;
             }
+            return false;
+        });
+        var off = new Button
+        {
+            Content = "Отключить", MinWidth = 90, Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(0, 0, 8, 0),
+            Visibility = linked ? Visibility.Visible : Visibility.Collapsed,
         };
+        buttons.Children.Insert(0, off);
         off.Click += (_, _) =>
         {
             result = new SiteLinkResult("", "", DateTime.Today, null);
@@ -151,10 +157,7 @@ public static class CashDialogs
         var amount = new TextBox { Text = Models.Money.FormatInput(current), Width = 160, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
         var reason = new TextBox { MaxLength = 500, Padding = pad };
         var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
-        var (buttons, _) = Buttons("Записать", window, () => { });
-        var save = new Button { Content = "Записать", MinWidth = 100, Padding = new Thickness(10, 4, 10, 4), IsDefault = true };
-        buttons.Children[0] = save;
-        save.Click += (_, _) =>
+        var (buttons, _) = Buttons("Записать", window, () =>
         {
             error.Visibility = Visibility.Visible;
             if (Models.Money.ParseSigned(amount.Text) is not { } balance) error.Text = "Баланс — число, например 1500 или -250,50";
@@ -162,9 +165,10 @@ public static class CashDialogs
             else
             {
                 result = (balance, reason.Text.Trim());
-                window.Close();
+                return true;
             }
-        };
+            return false;
+        });
         window.Content = new StackPanel
         {
             Margin = new Thickness(20),
@@ -202,7 +206,8 @@ public static class CashDialogs
         WindowStartupLocation = owner is { IsVisible: true } ? WindowStartupLocation.CenterOwner : WindowStartupLocation.CenterScreen,
     };
 
-    private static (StackPanel Panel, Button Ok) Buttons(string okText, Window window, Action onOk)
+    /// <summary>Кнопки «ОК» и «Отмена». <paramref name="onOk"/> — false, если введено не всё (окно остаётся открытым).</summary>
+    private static (StackPanel Panel, Button Ok) Buttons(string okText, Window window, Func<bool> onOk)
     {
         var ok = new Button { Content = okText, MinWidth = 100, Padding = new Thickness(10, 4, 10, 4), IsDefault = true };
         var cancel = new Button
@@ -211,8 +216,7 @@ public static class CashDialogs
         };
         ok.Click += (_, _) =>
         {
-            onOk();
-            window.Close();
+            if (onOk()) window.Close();
         };
         var panel = new StackPanel
         {
