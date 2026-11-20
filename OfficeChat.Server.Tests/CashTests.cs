@@ -18,10 +18,11 @@ public class CashTests : IDisposable
         try { Directory.Delete(_folder, true); } catch (IOException) { }
     }
 
-    private CashService Create(string name, string code = "магазин-1")
+    private CashService Create(string name, string code = "магазин-1", ISupplierSite? site = null)
     {
         var settings = new AppSettings { DisplayName = name, CashMode = true, CashCode = code };
-        var service = new CashService(settings, Path.Combine(_folder, name + ".db"), () => _network.Join(), _network.Context) { AutoSync = false };
+        var service = new CashService(settings, Path.Combine(_folder, name + ".db"), () => _network.Join(), _network.Context, site)
+            { AutoSync = false };
         service.Start();
         _services.Add(service);
         return service;
@@ -136,6 +137,151 @@ public class CashTests : IDisposable
         Assert.All(new[] { second, third }, s => Assert.Equal(6000, Assert.Single(s.Suppliers).Balance));
     }
 
+    // ---- Сайт поставщика ----
+
+    private sealed class FakeSite : ISupplierSite
+    {
+        public List<ExternalOrder> Orders { get; } = new();
+        public List<ExternalReturn> Returns { get; } = new();
+        public string? Error { get; set; }
+        public (string Login, string Password, DateTime Since)? Last { get; private set; }
+
+        public Task<SiteData> FetchAsync(string login, string password, DateTime since, CancellationToken cancel)
+        {
+            Last = (login, password, since);
+            if (Error != null) throw new SiteException(Error);
+            return Task.FromResult(new SiteData(Orders.ToList(), Returns.ToList()));
+        }
+    }
+
+    [Fact]
+    public async Task Site_orders_wait_for_payment_and_credited_returns_go_to_balance()
+    {
+        var site = new FakeSite();
+        var today = DateTime.Today;
+        site.Orders.Add(new ExternalOrder("50000011", today.AddHours(13), "Выдан", 1250000));
+        site.Orders.Add(new ExternalOrder("50000012", today.AddHours(11), "Выдан", 979980));
+        site.Orders.Add(new ExternalOrder("50000013", today.AddHours(9), "Аннулирован", 0));
+        site.Orders.Add(new ExternalOrder("50000014", today.AddDays(-3), "Выдан", 50000)); // до начала учёта
+        site.Returns.Add(new ExternalReturn("60000011", today, "Поставлен на баланс", "Отказ клиента", "0", 123450));
+        site.Returns.Add(new ExternalReturn("60000012", today, "Согласование", "Отказ клиента", "0", 99900));
+        site.Returns.Add(new ExternalReturn("60000013", today.AddDays(-5), "Поставлен на баланс", "Отказ клиента", "0", 10000));
+
+        var cash = Create("Касса", site: site);
+        var forum = cash.AddSupplier("Форум-Авто");
+        cash.SetBalance(forum, 500000, "начинаем учёт");            // корректировка: было 5000 ₽
+        cash.Link(forum, "shop-1", "пароль!", today);
+        await cash.RefreshSitesAsync();
+
+        Assert.Equal(("shop-1", "пароль!", today), site.Last);
+        Assert.Equal("пароль!", cash.PasswordOf(forum));
+        Assert.DoesNotContain("пароль!", forum.Link!.Secret); // в журнале — только зашифрованный
+        // Ожидают оплаты два заказа за сегодня; аннулированный и старый — нет.
+        Assert.Equal(new[] { "50000012", "50000011" }, forum.PendingOrders.Select(o => o.Number));
+        // Возврат «Поставлен на баланс» — сразу плюс к балансу; на согласовании и старый — нет.
+        Assert.Equal(500000 + 123450, forum.Balance);
+
+        // Оплатили заказ: по накладной 9 799,80, выдали 9 800 — он больше не ждёт.
+        var order = forum.PendingOrders[0];
+        cash.RecordDelivery(forum, order.Sum, 980000, "", order.External);
+        Assert.Equal(500000 + 123450 + 20, forum.Balance);
+        cash.SkipOrder(forum, forum.PendingOrders[0], "оплачен картой");
+        Assert.Empty(forum.PendingOrders);
+
+        // Повторное обновление не учитывает возврат второй раз.
+        await cash.RefreshSitesAsync();
+        Assert.Equal(500000 + 123450 + 20, forum.Balance);
+        Assert.Empty(forum.PendingOrders);
+
+        // Отменили запись об оплате — заказ снова ждёт.
+        cash.Cancel(forum.Entries.Single(e => e.Operation.Kind == CashKind.Delivery), "не тот заказ");
+        Assert.Single(forum.PendingOrders);
+    }
+
+    [Fact]
+    public async Task Same_return_from_two_computers_counts_once()
+    {
+        var site = new FakeSite();
+        var first = Create("Касса 1", site: site);
+        var second = Create("Касса 2", site: site);
+        var forum = first.AddSupplier("Форум-Авто");
+        first.Link(forum, "shop-1", "secret", DateTime.Today);
+        Sync();
+        var seen = Assert.Single(second.Suppliers);
+        Assert.Equal("secret", second.PasswordOf(seen)); // тот же код кассы — пароль расшифровывается и там
+
+        // Возврат появился, когда связи между кассами не было: обе записали его.
+        site.Returns.Add(new ExternalReturn("60000011", DateTime.Today, "Поставлен на баланс", "Отказ клиента", "0", 123450));
+        _network.Offline = true;
+        await first.RefreshSitesAsync();
+        await second.RefreshSitesAsync();
+        _network.Offline = false;
+        Sync();
+
+        Assert.Equal(123450, forum.Balance);
+        Assert.Equal(123450, seen.Balance);
+        Assert.Single(forum.Entries, e => e.IsDuplicate);
+    }
+
+    [Fact]
+    public async Task Site_error_is_shown_to_the_cashier()
+    {
+        var site = new FakeSite { Error = "Сайт не пустил: проверьте логин и пароль" };
+        var cash = Create("Касса", site: site);
+        var forum = cash.AddSupplier("Форум-Авто");
+        cash.Link(forum, "shop-1", "wrong", DateTime.Today);
+        await cash.RefreshSitesAsync();
+        Assert.Contains("проверьте логин и пароль", forum.SiteStatus);
+    }
+
+    [Fact]
+    public void Balance_correction_sets_the_balance_from_that_moment()
+    {
+        var cash = Create("Касса");
+        var milk = cash.AddSupplier("Молочный завод");
+        cash.RecordReturn(milk, 10000, "");
+        cash.SetBalance(milk, 250000, "сверка с поставщиком");
+        cash.RecordDelivery(milk, 67234, 70000, "");
+        Assert.Equal(250000 + 2766, milk.Balance);
+        Assert.Equal(240000, milk.Entries[1].Delta);
+    }
+
+    [Fact]
+    public void Forum_auto_pages_are_parsed()
+    {
+        const string archive = """
+            <p>Страниц(139):&nbsp;<input type="text" name="page" value="1"></p>
+            <h1>Архив заказов</h1><table><tbody>
+            <tr><td class="th">Заказ</td><td class="th">Дата</td><td class="th">Статус заказа</td><td class="th">Сумма</td></tr>
+            <tr class="w"><td class="td" align="center"><a href="https://itrade.forum-auto.ru/shop/paid_view.html?paid=1001">50000001</a></td><td class="td" align="center">20.11.2026 13:08:02</td><td class="td">Выдан</td><td class="td">12500.00</td><td class="td">MSK</td></tr>
+            <tr class="w"><td class="td" align="center"><a href="https://itrade.forum-auto.ru/shop/paid_view.html?paid=1002">50000002</a></td><td class="td" align="center">17.11.2026 14:22:06</td><td class="td">Аннулирован</td><td class="td">0.00</td></tr>
+            </tbody></table><table><tbody>
+            <tr class="w"><td class="td" align="center"><a href="https://itrade.forum-auto.ru/shop/paid_view.html?did=50000003">50000003</a> </td><td class="td">17.11.2026 21:52:08</td><td class="td">Выдан</td><td class="td">0</td></tr>
+            </tbody></table>
+            """;
+        var orders = ForumAutoParser.ParseOrders(archive);
+        Assert.Equal(2, orders.Count); // документ без заказа (did=…) пропущен
+        Assert.Equal(new ExternalOrder("50000001", new DateTime(2026, 11, 20, 13, 8, 2), "Выдан", 1250000), orders[0]);
+        Assert.Equal(139, ForumAutoParser.PageCount(archive));
+        Assert.False(ForumAutoParser.IsLoginPage(archive));
+
+        const string returns = """
+            <h1>Возвраты</h1><table><tbody><tr><td class="th">Ключ</td></tr>
+            <tr class="w">    <td class="td"><a href="https://itrade.forum-auto.ru/shop/returns/60000001.html">60000001</a></td>    <td class="td">60000001</td>    <td class="td">20.11.2026</td>    <td class="td">Imsync Imsync</td>    <td class="td">Поставлен на баланс</td>    <td class="td">Отказ клиента</td>    <td class="td">0</td>    <td class="td">1234.5</td></tr>
+            <tr class="w">    <td class="td"><a href="https://itrade.forum-auto.ru/shop/returns/60000002.html">60000002</a></td>    <td class="td">28 Ч</td>    <td class="td">04.12.2018</td>    <td class="td">Неизвестно </td>    <td class="td">Аннулирован</td>    <td class="td">Отказ клиента</td>    <td class="td">20</td>    <td class="td">999.99</td></tr>
+            </tbody></table>
+            """;
+        var parsed = ForumAutoParser.ParseReturns(returns);
+        Assert.Equal(2, parsed.Count);
+        Assert.Equal(new ExternalReturn("60000001", new DateTime(2026, 11, 20), "Поставлен на баланс", "Отказ клиента", "0", 123450), parsed[0]);
+        Assert.True(CashService.IsCreditedReturn(parsed[0]));
+        Assert.False(CashService.IsCreditedReturn(parsed[1]));
+
+        const string login = """<form><input type="hidden" name="csrf_token" value="abc123"><input type="password" name="password"></form>""";
+        Assert.True(ForumAutoParser.IsLoginPage(login));
+        Assert.Equal("abc123", ForumAutoParser.CsrfToken(login));
+    }
+
     // ---- Сеть в памяти ----
 
     private sealed class FakeNetwork
@@ -145,6 +291,8 @@ public class CashTests : IDisposable
         private int _counter;
 
         public int DropEvery { get; set; }
+        /// <summary>Сеть «пропала»: пакеты никуда не доходят.</summary>
+        public bool Offline { get; set; }
         public SynchronizationContext Context { get; }
 
         public FakeNetwork() => Context = new QueueContext(_queue);
@@ -158,7 +306,7 @@ public class CashTests : IDisposable
 
         public void Deliver(byte[] data, FakeTransport from, FakeTransport to)
         {
-            if (DropEvery > 0 && ++_counter % DropEvery == 0) return;
+            if (Offline || DropEvery > 0 && ++_counter % DropEvery == 0) return;
             to.Raise(data, from.EndPoint);
         }
 

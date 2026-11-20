@@ -38,6 +38,10 @@
         <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <Button Content="🌐 Сайт…" Padding="8,3" FontSize="12" Click="Site_Click"
+                            ToolTip.Tip="Брать заказы и возвраты с сайта поставщика (Форум-Авто)" />
+                    <Button Content="Корректировка…" Padding="8,3" FontSize="12" Click="Correction_Click"
+                            ToolTip.Tip="Задать баланс поставщика (например, начать учёт с известной суммы)" />
                     <Button Content="Переименовать" Padding="8,3" FontSize="12" Click="Rename_Click" />
                     <Button x:Name="RemoveButton" Content="Убрать из списка" Padding="8,3" FontSize="12" Click="Remove_Click" />
                 </StackPanel>
@@ -46,6 +50,43 @@
                     <TextBlock x:Name="BalanceHint" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </DockPanel>
+        </Border>
+
+        <!-- Сайт поставщика: заказы, которые ждут оплаты -->
+        <Border x:Name="SiteBox" DockPanel.Dock="Top" Padding="16,8" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,0,1"
+                Background="#F5F9FF" IsVisible="False">
+            <StackPanel Spacing="4">
+                <DockPanel>
+                    <Button x:Name="RefreshSiteButton" DockPanel.Dock="Right" Content="↻ Обновить" Padding="8,2" FontSize="12"
+                            Click="RefreshSite_Click" />
+                    <TextBlock x:Name="SiteTitle" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock x:Name="SiteStatusText" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+                <ScrollViewer MaxHeight="170">
+                    <ItemsControl x:Name="PendingList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,2" Padding="10,5" CornerRadius="6" Background="White"
+                                        BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SumText}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                       Margin="0,0,6,0" />
+                                            <Button Content="Оплатить" Padding="10,2" FontSize="12" Classes="flat" Click="PayOrder_Click" />
+                                            <Button Content="Не оплачиваем…" Padding="8,2" FontSize="11" Click="SkipOrder_Click" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Number, StringFormat='Заказ №{0}'}" FontSize="13" />
+                                            <TextBlock Text="{Binding DateText}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
         </Border>
 
         <!-- Новая запись -->
@@ -90,6 +131,15 @@
                     <TextBox x:Name="AmountBox" FontSize="16" />
                 </StackPanel>
 
+                <!-- Оплата заказа с сайта: какой заказ, и как отказаться -->
+                <Border x:Name="OrderChip" Padding="10,4" CornerRadius="4" Background="#E0ECFF" IsVisible="False">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="✕" Padding="6,0" FontSize="11" Click="ClearOrder_Click"
+                                ToolTip.Tip="Не связывать с заказом" />
+                        <TextBlock x:Name="OrderChipText" FontSize="12" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
+
                 <StackPanel>
                     <TextBlock Classes="label" Text="Комментарий (накладная, водитель…) — необязательно" />
                     <TextBox x:Name="CommentBox" MaxLength="500" />
@@ -109,7 +159,7 @@
                 <ItemsControl x:Name="History" Margin="14,8">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Classes="entry" Classes.cancelled="{Binding IsCancelled}" Margin="0,3" Padding="12,8"
+                            <Border Classes="entry" Classes.cancelled="{Binding IsInactive}" Margin="0,3" Padding="12,8"
                                     CornerRadius="8" Background="#F6F7F9" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Margin="12,0,0,0" HorizontalAlignment="Right">
@@ -119,7 +169,7 @@
                                         <TextBlock Text="{Binding BalanceAfterText}" FontSize="11" HorizontalAlignment="Right"
                                                    Foreground="{StaticResource MutedTextBrush}" />
                                         <Button Content="Отменить…" Padding="8,1" FontSize="11" Margin="0,4,0,0" HorizontalAlignment="Right"
-                                                IsVisible="{Binding !IsCancelled}" Click="CancelEntry_Click" />
+                                                IsVisible="{Binding CanCancel}" Click="CancelEntry_Click" />
                                     </StackPanel>
                                     <StackPanel Spacing="1">
                                         <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" Classes="strike" />

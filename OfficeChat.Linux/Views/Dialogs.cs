@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
+using OfficeChat.Models;
 
 namespace OfficeChat.Views;
 
@@ -170,6 +171,147 @@ public static class Dialogs
             Margin = new Thickness(0, 10, 0, 0), Children = { ok, cancel },
         });
         window.Content = panel;
+        await window.ShowDialog(owner);
+        return result;
+    }
+
+    /// <summary>Что ввели в окне «Сайт поставщика». Пустой логин — отключить сайт.</summary>
+    public sealed record SiteLinkResult(string Login, string Password, DateTime Since, long? StartBalance);
+
+    /// <summary>Подключить поставщика к сайту (Форум-Авто): логин, пароль, с какой даты учитывать, начальный баланс.</summary>
+    public static async Task<SiteLinkResult?> SiteLink(Window owner, string login, bool linked, DateTime since)
+    {
+        SiteLinkResult? result = null;
+        var window = new Window
+        {
+            Title = "Сайт поставщика",
+            Width = 460,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Icon = Platform.AppIcon.Window,
+        };
+        TextBlock Label(string text) => new() { Text = text, FontSize = 12, Margin = new Thickness(0, 10, 0, 3) };
+        TextBlock Hint(string text) => new()
+        {
+            Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = new SolidColorBrush(Color.Parse("#6B7280")),
+        };
+        var loginBox = new TextBox { Text = login, MaxLength = 100 };
+        var passwordBox = new TextBox { PasswordChar = '•', MaxLength = 200, Watermark = linked ? "не меняется, если оставить пустым" : "" };
+        var sinceBox = new TextBox { Text = since.ToString("dd.MM.yyyy"), Width = 140, HorizontalAlignment = HorizontalAlignment.Left };
+        var balanceBox = new TextBox { Width = 140, HorizontalAlignment = HorizontalAlignment.Left, Watermark = "не менять" };
+        var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        var ok = new Button { Content = "Сохранить", MinWidth = 100, HorizontalContentAlignment = HorizontalAlignment.Center, IsDefault = true };
+        var off = new Button { Content = "Отключить", MinWidth = 90, HorizontalContentAlignment = HorizontalAlignment.Center, IsVisible = linked };
+        var cancel = new Button { Content = "Отмена", MinWidth = 90, HorizontalContentAlignment = HorizontalAlignment.Center, IsCancel = true };
+        ok.Click += (_, _) =>
+        {
+            var name = (loginBox.Text ?? "").Trim();
+            long? balance = null;
+            error.IsVisible = true;
+            if (name.Length == 0) error.Text = "Введите логин";
+            else if (!linked && string.IsNullOrEmpty(passwordBox.Text)) error.Text = "Введите пароль";
+            else if (!DateTime.TryParseExact((sinceBox.Text ?? "").Trim(), "dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture,
+                         System.Globalization.DateTimeStyles.None, out var date))
+                error.Text = "Дата — в виде 20.11.2026";
+            else if (!string.IsNullOrWhiteSpace(balanceBox.Text) && (balance = Money.ParseSigned(balanceBox.Text)) == null)
+                error.Text = "Начальный баланс — число, например 1500 или -250,50";
+            else
+            {
+                result = new SiteLinkResult(name, passwordBox.Text ?? "", date, balance);
+                window.Close();
+            }
+        };
+        off.Click += (_, _) =>
+        {
+            result = new SiteLinkResult("", "", DateTime.Today, null);
+            window.Close();
+        };
+        cancel.Click += (_, _) => window.Close();
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Children =
+            {
+                new TextBlock { Text = "Форум-Авто (itrade.forum-auto.ru)", FontSize = 15, FontWeight = FontWeight.SemiBold },
+                Hint("Касса сама будет заходить в личный кабинет: заказы из архива появятся в списке «ждут оплаты» " +
+                     "(остаётся ввести, сколько отдали), а возвраты «Поставлен на баланс» сразу прибавятся к балансу."),
+                Label("Логин"), loginBox,
+                Label("Пароль"), passwordBox,
+                Hint("Пароль хранится в журнале кассы зашифрованным кодом кассы — им пользуются все компьютеры этой кассы."),
+                Label("Учитывать заказы и возвраты с даты"), sinceBox,
+                Label("Баланс поставщика на эту дату (необязательно)"), balanceBox,
+                Hint("Чтобы начать учёт с известной суммы: баланс станет таким, дальше пойдут заказы и возвраты с сайта."),
+                error,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8,
+                    Margin = new Thickness(0, 16, 0, 0), Children = { off, ok, cancel },
+                },
+            },
+        };
+        window.Opened += (_, _) => (login.Length == 0 ? loginBox : passwordBox).Focus();
+        await window.ShowDialog(owner);
+        return result;
+    }
+
+    /// <summary>Корректировка баланса: новая сумма и причина. null — отменили.</summary>
+    public static async Task<(long Balance, string Reason)?> Correction(Window owner, string supplier, long current)
+    {
+        (long, string)? result = null;
+        var window = new Window
+        {
+            Title = "Корректировка баланса",
+            Width = 420,
+            SizeToContent = SizeToContent.Height,
+            CanResize = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Icon = Platform.AppIcon.Window,
+        };
+        var amount = new TextBox { Text = Money.FormatInput(current), Width = 160, HorizontalAlignment = HorizontalAlignment.Left };
+        var reason = new TextBox { MaxLength = 500, Watermark = "например: сверка с поставщиком" };
+        var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        var ok = new Button { Content = "Записать", MinWidth = 100, HorizontalContentAlignment = HorizontalAlignment.Center, IsDefault = true };
+        var cancel = new Button { Content = "Отмена", MinWidth = 90, HorizontalContentAlignment = HorizontalAlignment.Center, IsCancel = true };
+        ok.Click += (_, _) =>
+        {
+            error.IsVisible = true;
+            if (Money.ParseSigned(amount.Text) is not { } balance) error.Text = "Баланс — число, например 1500 или -250,50";
+            else if (string.IsNullOrWhiteSpace(reason.Text)) error.Text = "Укажите причину — она останется в истории";
+            else
+            {
+                result = (balance, reason.Text.Trim());
+                window.Close();
+            }
+        };
+        cancel.Click += (_, _) => window.Close();
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(20),
+            Spacing = 6,
+            Children =
+            {
+                new TextBlock
+                {
+                    Text = $"{supplier}: сейчас {Money.Format(current)}. С этого момента баланс станет таким, как укажете " +
+                           "(запись с причиной останется в истории).",
+                    TextWrapping = TextWrapping.Wrap, FontSize = 13,
+                },
+                new TextBlock { Text = "Новый баланс, ₽", FontSize = 12, Margin = new Thickness(0, 8, 0, 0) }, amount,
+                new TextBlock { Text = "Причина", FontSize = 12, Margin = new Thickness(0, 8, 0, 0) }, reason,
+                error,
+                new StackPanel
+                {
+                    Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Spacing = 8,
+                    Margin = new Thickness(0, 12, 0, 0), Children = { ok, cancel },
+                },
+            },
+        };
+        window.Opened += (_, _) =>
+        {
+            amount.Focus();
+            amount.SelectAll();
+        };
         await window.ShowDialog(owner);
         return result;
     }

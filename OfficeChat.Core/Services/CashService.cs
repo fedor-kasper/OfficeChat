@@ -55,6 +55,11 @@ public sealed class CashService : IDisposable
     private ICashTransport? _transport;
     private UiTimer? _timer;
     private byte[]? _key;
+    private readonly ISupplierSite _site;
+    // Заказы, взятые с сайта, по поставщикам (в журнал попадают, только когда кассир записал оплату).
+    private readonly Dictionary<Guid, List<ExternalOrder>> _siteOrders = new();
+    private UiTimer? _siteTimer;
+    private bool _refreshingSites;
 
     /// <summary>Поставщики по алфавиту (убранные из списка не показываются).</summary>
     public ObservableCollection<Supplier> Suppliers { get; } = new();
@@ -74,10 +79,14 @@ public sealed class CashService : IDisposable
     /// <summary>Синхронизация включена (задан код кассы).</summary>
     public bool IsSyncing => _transport != null;
 
+    /// <summary>Как часто заглядывать на сайты поставщиков.</summary>
+    private static readonly TimeSpan SiteInterval = TimeSpan.FromMinutes(10);
+
     public CashService(AppSettings settings, string? databasePath = null, Func<ICashTransport>? transport = null,
-        SynchronizationContext? context = null)
+        SynchronizationContext? context = null, ISupplierSite? site = null)
     {
         _settings = settings;
+        _site = site ?? new ForumAutoSite();
         _store = new CashStore(databasePath);
         _ui = context ?? SynchronizationContext.Current ?? new SynchronizationContext();
         _createTransport = transport ?? (() => new UdpCashTransport());
@@ -89,6 +98,14 @@ public sealed class CashService : IDisposable
     public void Start()
     {
         Stop();
+        if (AutoSync)
+        {
+            // Сайты поставщиков: первый раз — чуть погодя (сначала синхронизируемся с остальными кассами), дальше — регулярно.
+            _siteTimer = new UiTimer { Interval = SiteInterval };
+            _siteTimer.Tick += async (_, _) => await RefreshSitesAsync();
+            _siteTimer.Start();
+            _ = Task.Delay(TimeSpan.FromSeconds(20)).ContinueWith(_ => _ui.Post(async _ => await RefreshSitesAsync(), null));
+        }
         if (string.IsNullOrWhiteSpace(_settings.CashCode)) return;
         _key = DeriveKey(_settings.CashCode);
         try
@@ -118,6 +135,8 @@ public sealed class CashService : IDisposable
     {
         _timer?.Dispose();
         _timer = null;
+        _siteTimer?.Dispose();
+        _siteTimer = null;
         if (_transport != null)
         {
             _transport.Received -= OnReceived;
@@ -169,12 +188,52 @@ public sealed class CashService : IDisposable
         return true;
     }
 
-    /// <summary>Поставка: по накладной <paramref name="due"/>, выдали <paramref name="paid"/> (копейки).</summary>
-    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment) =>
-        Record(new CashOperation { Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500) });
+    /// <summary>Поставка: по накладной <paramref name="due"/>, выдали <paramref name="paid"/> (копейки).
+    /// <paramref name="external"/> — заказ с сайта поставщика, если оплачиваем его.</summary>
+    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment, string external = "") =>
+        Record(new CashOperation
+        {
+            Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500), External = external,
+        });
 
-    public CashOperation RecordReturn(Supplier supplier, long amount, string comment) =>
-        Record(new CashOperation { Kind = CashKind.Return, SupplierId = supplier.Id, Amount = amount, Comment = Clean(comment, 500) });
+    public CashOperation RecordReturn(Supplier supplier, long amount, string comment, string external = "") =>
+        Record(new CashOperation
+        {
+            Kind = CashKind.Return, SupplierId = supplier.Id, Amount = amount, Comment = Clean(comment, 500), External = external,
+        });
+
+    /// <summary>Корректировка: баланс поставщика становится <paramref name="balance"/> (с этого момента).</summary>
+    public CashOperation SetBalance(Supplier supplier, long balance, string reason) =>
+        Record(new CashOperation { Kind = CashKind.BalanceSet, SupplierId = supplier.Id, Balance = balance, Comment = Clean(reason, 500) });
+
+    /// <summary>Заказ с сайта не оплачиваем (например, оплачен иначе) — убрать из ожидающих, с причиной.</summary>
+    public CashOperation SkipOrder(Supplier supplier, ExternalOrder order, string reason) =>
+        Record(new CashOperation
+        {
+            Kind = CashKind.OrderSkipped, SupplierId = supplier.Id, External = order.External, Due = order.Sum,
+            Comment = Clean($"Заказ №{order.Number} от {order.DateText} на {order.SumText}" + (reason.Length > 0 ? $": {reason}" : ""), 500),
+        });
+
+    /// <summary>
+    /// Подключить поставщика к сайту: логин, пароль (хранится зашифрованным кодом кассы, уходит на все компьютеры кассы)
+    /// и с какой даты учитывать заказы и возвраты. Пустой логин — отключить.
+    /// </summary>
+    public void Link(Supplier supplier, string login, string password, DateTime since)
+    {
+        Record(new CashOperation
+        {
+            Kind = CashKind.SupplierLinked, SupplierId = supplier.Id, Name = login.Length > 0 ? ForumAutoSite.Id : "",
+            Login = Clean(login, 100), Secret = login.Length > 0 ? ProtectSecret(password) : "", Since = new DateTimeOffset(since.Date),
+        });
+        _siteOrders.Remove(supplier.Id);
+        supplier.SiteStatus = login.Length > 0 ? "Подключено — загружаем заказы…" : "";
+        Rebuild();
+        Changed?.Invoke();
+        if (login.Length > 0) _ = RefreshSitesAsync();
+    }
+
+    /// <summary>Пароль подключённого сайта (расшифрованный), null — не удалось (сменили код кассы?).</summary>
+    public string? PasswordOf(Supplier supplier) => supplier.Link is { } link ? UnprotectSecret(link.Secret) : null;
 
     public CashOperation RecordPayout(Supplier supplier, long amount, string comment) =>
         Record(new CashOperation { Kind = CashKind.Payout, SupplierId = supplier.Id, Amount = amount, Comment = Clean(comment, 500) });
@@ -182,7 +241,7 @@ public sealed class CashService : IDisposable
     /// <summary>Отменить ошибочную запись: она остаётся в истории зачёркнутой, с тем, кто и почему отменил.</summary>
     public bool Cancel(CashEntry entry, string reason)
     {
-        if (entry.IsCancelled) return false;
+        if (!entry.CanCancel) return false;
         Record(new CashOperation
         {
             Kind = CashKind.Cancel, SupplierId = entry.Operation.SupplierId, TargetId = entry.Operation.Id, Comment = Clean(reason, 500),
@@ -206,7 +265,7 @@ public sealed class CashService : IDisposable
         _store.Add(op);
         Remember(op);
         Rebuild();
-        Log.Info($"Касса: {op.Kind} {Money.FormatSigned(op.Delta)} ({op.SupplierId})");
+        Log.Info($"Касса: {op.Kind} {Money.FormatSigned(op.Delta)} {op.External} ({op.SupplierId})");
         Changed?.Invoke();
         RefreshPeerSync();
         // Сразу — тем, кто в сети, не дожидаясь очередного обмена.
@@ -244,7 +303,12 @@ public sealed class CashService : IDisposable
         foreach (var op in ordered.Where(o => o.Kind == CashKind.Cancel)) cancels.TryAdd(op.TargetId, op);
 
         var removed = new HashSet<Guid>();
-        foreach (var supplier in _suppliers.Values) supplier.Entries.Clear();
+        foreach (var supplier in _suppliers.Values)
+        {
+            supplier.Entries.Clear();
+            supplier.Recorded.Clear();
+            supplier.Link = null;
+        }
         foreach (var op in ordered)
         {
             if (op.Kind == CashKind.Cancel) continue;
@@ -260,8 +324,14 @@ public sealed class CashService : IDisposable
                 case CashKind.SupplierRemoved:
                     removed.Add(op.SupplierId);
                     break;
+                case CashKind.SupplierLinked:
+                    supplier.Link = op.Login.Length > 0 ? op : null;
+                    break;
                 default:
-                    supplier.Entries.Add(new CashEntry { Operation = op, Cancellation = cancels.GetValueOrDefault(op.Id) });
+                    var entry = new CashEntry { Operation = op, Cancellation = cancels.GetValueOrDefault(op.Id) };
+                    // Один заказ или возврат с сайта учитывается один раз (например, его записали на двух кассах сразу).
+                    if (op.External.Length > 0 && !entry.IsCancelled && !supplier.Recorded.Add(op.External)) entry.IsDuplicate = true;
+                    supplier.Entries.Add(entry);
                     break;
             }
             if (op.CreatedAt > supplier.LastActivity) supplier.LastActivity = op.CreatedAt;
@@ -272,15 +342,18 @@ public sealed class CashService : IDisposable
             long balance = 0;
             foreach (var entry in supplier.Entries)
             {
-                if (!entry.IsCancelled) balance += entry.Operation.Delta;
+                var op = entry.Operation;
+                entry.Delta = op.Kind == CashKind.BalanceSet ? op.Balance - balance : op.Delta;
+                if (entry.Counts) balance += entry.Delta;
                 entry.BalanceAfter = balance;
             }
             supplier.Balance = balance;
+            UpdatePending(supplier);
         }
 
         // Убранный из списка возвращается, если с другого компьютера пришли деньги по нему.
         var visible = _suppliers.Values
-            .Where(s => !removed.Contains(s.Id) || s.Entries.Any(e => !e.IsCancelled))
+            .Where(s => !removed.Contains(s.Id) || s.Entries.Any(e => e.Counts))
             .OrderBy(s => s.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
         for (var i = 0; i < visible.Count; i++)
         {
@@ -290,6 +363,130 @@ public sealed class CashService : IDisposable
             else Suppliers.Move(index, i);
         }
         while (Suppliers.Count > visible.Count) Suppliers.RemoveAt(Suppliers.Count - 1);
+    }
+
+    // ---- Сайты поставщиков ----
+
+    /// <summary>Ожидающие оплаты заказы: с сайта, не раньше даты начала учёта, не аннулированные и ещё не записанные.</summary>
+    private void UpdatePending(Supplier supplier)
+    {
+        supplier.SiteLoaded = _siteOrders.ContainsKey(supplier.Id);
+        if (supplier.Link?.Since is not { } since || !_siteOrders.TryGetValue(supplier.Id, out var orders))
+        {
+            supplier.PendingOrders = new();
+            return;
+        }
+        supplier.PendingOrders = orders
+            .Where(o => o.Date >= since.Date && o.Sum > 0 && !IsCancelledStatus(o.Status) && !supplier.Recorded.Contains(o.External))
+            .OrderBy(o => o.Date).ToList();
+    }
+
+    private static bool IsCancelledStatus(string status) => status.Contains("Аннулир", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Возврат, который поставщик уже зачислил нам на баланс.</summary>
+    public static bool IsCreditedReturn(ExternalReturn r) => r.Status.Contains("на баланс", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Заглянуть на сайты подключённых поставщиков: заказы — в список ожидающих оплаты, возвраты «Поставлен на баланс» —
+    /// сразу в журнал (плюс к балансу). Ошибки — в строку состояния поставщика.
+    /// </summary>
+    public async Task RefreshSitesAsync()
+    {
+        if (_refreshingSites || !_settings.CashMode) return;
+        _refreshingSites = true;
+        try
+        {
+            foreach (var supplier in _suppliers.Values.Where(s => s.Link != null && Suppliers.Contains(s)).ToList())
+            {
+                var link = supplier.Link!;
+                if (UnprotectSecret(link.Secret) is not { } password)
+                {
+                    supplier.SiteStatus = "Не удалось расшифровать пароль сайта (сменили код кассы?) — подключите сайт заново";
+                    Changed?.Invoke();
+                    continue;
+                }
+                try
+                {
+                    var data = await _site.FetchAsync(link.Login, password, link.Since?.Date ?? DateTime.Today, CancellationToken.None);
+                    if (supplier.Link != link) continue; // пока ходили — переподключили
+                    _siteOrders[supplier.Id] = data.Orders;
+                    var added = ApplyReturns(supplier, data.Returns);
+                    Rebuild();
+                    supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm}" + (added > 0 ? $", новых возвратов: {added}" : "");
+                    Log.Info($"Касса: сайт {link.Login} — заказов {data.Orders.Count}, возвратов {data.Returns.Count}, новых возвратов {added}");
+                }
+                catch (SiteException ex)
+                {
+                    supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.Message}";
+                    Log.Warn($"Касса: сайт {link.Login}: {ex.Message}", ex.InnerException);
+                }
+                Changed?.Invoke();
+            }
+        }
+        finally
+        {
+            _refreshingSites = false;
+        }
+    }
+
+    /// <summary>Возвраты «Поставлен на баланс», которых ещё нет в журнале, — записать. Возвращает, сколько записали.</summary>
+    private int ApplyReturns(Supplier supplier, List<ExternalReturn> returns)
+    {
+        var since = supplier.Link?.Since?.Date ?? DateTime.Today;
+        var added = 0;
+        foreach (var item in returns.Where(r => IsCreditedReturn(r) && r.Date >= since && r.Sum > 0 && !supplier.Recorded.Contains(r.External))
+                     .OrderBy(r => r.Date))
+        {
+            var penalty = item.Penalty is "" or "0" ? "" : $", штраф {item.Penalty}";
+            RecordReturn(supplier, item.Sum, $"Возврат №{item.Number} от {item.Date:dd.MM.yyyy} ({item.Reason}{penalty}) — с сайта", item.External);
+            added++;
+        }
+        return added;
+    }
+
+    // Пароль сайта — в журнале, зашифрованный кодом кассы: его видят только компьютеры этой кассы.
+    private static byte[] SecretKey(string code) =>
+        Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(code.Trim()), "OfficeChat cash secret v1"u8.ToArray(), 100_000,
+            HashAlgorithmName.SHA256, 32);
+
+    private byte[]? _secretKey;
+    private string? _secretKeyCode;
+
+    private byte[] CurrentSecretKey()
+    {
+        if (_secretKey == null || _secretKeyCode != _settings.CashCode)
+        {
+            _secretKey = SecretKey(_settings.CashCode);
+            _secretKeyCode = _settings.CashCode;
+        }
+        return _secretKey;
+    }
+
+    private string ProtectSecret(string secret)
+    {
+        var plain = Encoding.UTF8.GetBytes(secret);
+        var result = new byte[12 + 16 + plain.Length];
+        RandomNumberGenerator.Fill(result.AsSpan(0, 12));
+        using var aes = new AesGcm(CurrentSecretKey(), 16);
+        aes.Encrypt(result.AsSpan(0, 12), plain, result.AsSpan(28), result.AsSpan(12, 16));
+        return Convert.ToBase64String(result);
+    }
+
+    private string? UnprotectSecret(string secret)
+    {
+        try
+        {
+            var data = Convert.FromBase64String(secret);
+            if (data.Length < 28) return null;
+            var plain = new byte[data.Length - 28];
+            using var aes = new AesGcm(CurrentSecretKey(), 16);
+            aes.Decrypt(data.AsSpan(0, 12), data.AsSpan(28), data.AsSpan(12, 16), plain);
+            return Encoding.UTF8.GetString(plain);
+        }
+        catch (Exception ex) when (ex is FormatException or CryptographicException)
+        {
+            return null;
+        }
     }
 
     // ---- Синхронизация ----
@@ -435,7 +632,9 @@ public sealed class CashService : IDisposable
         op.Id != Guid.Empty && op.DeviceId != Guid.Empty && op.Seq > 0 && op.SupplierId != Guid.Empty &&
         Enum.IsDefined(op.Kind) && op.Due is >= 0 and <= Money.MaxAmount && op.Paid is >= 0 and <= Money.MaxAmount &&
         op.Amount is >= 0 and <= Money.MaxAmount && op.Name.Length <= 100 && op.Comment.Length <= 500 &&
-        op.Author.Length <= 100 && op.Machine.Length <= 100 && (op.Kind != CashKind.Cancel || op.TargetId != Guid.Empty);
+        op.Author.Length <= 100 && op.Machine.Length <= 100 && (op.Kind != CashKind.Cancel || op.TargetId != Guid.Empty) &&
+        op.Balance is >= -Money.MaxAmount and <= Money.MaxAmount && op.External.Length <= 100 && op.Login.Length <= 100 &&
+        op.Secret.Length <= 1000;
 
     // ---- Шифрование ----
 

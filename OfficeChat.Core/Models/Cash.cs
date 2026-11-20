@@ -20,8 +20,14 @@ public enum CashKind
     Return = 11,
     /// <summary>Погашение: поставщик вернул деньги или учёл их в накладной — минус Amount с баланса.</summary>
     Payout = 12,
+    /// <summary>Корректировка: баланс поставщика становится равным Balance (например, начать учёт с известной суммы).</summary>
+    BalanceSet = 13,
+    /// <summary>Заказ с сайта поставщика (External) не оплачиваем — убрать из списка ожидающих.</summary>
+    OrderSkipped = 14,
     /// <summary>Отмена ошибочной записи TargetId (сама запись остаётся в журнале зачёркнутой).</summary>
     Cancel = 20,
+    /// <summary>Поставщик подключён к сайту: Name — какой сайт, Login, Secret — пароль (зашифрован кодом кассы), Since — с какой даты учитывать.</summary>
+    SupplierLinked = 30,
 }
 
 /// <summary>
@@ -43,12 +49,19 @@ public sealed record CashOperation
     [JsonPropertyName("amount")] public long Amount { get; init; }
     [JsonPropertyName("comment")] public string Comment { get; init; } = "";
     [JsonPropertyName("target")] public Guid TargetId { get; init; }
+    /// <summary>Корректировка: каким стал баланс (может быть и минусом).</summary>
+    [JsonPropertyName("balance")] public long Balance { get; init; }
+    /// <summary>Заказ или возврат на сайте поставщика («forum:order:72211819») — чтобы не учесть его дважды.</summary>
+    [JsonPropertyName("ext")] public string External { get; init; } = "";
+    [JsonPropertyName("login")] public string Login { get; init; } = "";
+    [JsonPropertyName("secret")] public string Secret { get; init; } = "";
+    [JsonPropertyName("since")] public DateTimeOffset? Since { get; init; }
     /// <summary>Кто записал: имя в программе и компьютер.</summary>
     [JsonPropertyName("author")] public string Author { get; init; } = "";
     [JsonPropertyName("machine")] public string Machine { get; init; } = "";
     [JsonPropertyName("at")] public DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>На сколько запись меняет баланс поставщика (без учёта отмены).</summary>
+    /// <summary>На сколько запись меняет баланс поставщика (без учёта отмены; у корректировки зависит от баланса до неё).</summary>
     [JsonIgnore]
     public long Delta => Kind switch
     {
@@ -58,9 +71,9 @@ public sealed record CashOperation
         _ => 0,
     };
 
-    /// <summary>Запись про деньги (её можно отменить).</summary>
+    /// <summary>Запись в истории поставщика (её можно отменить).</summary>
     [JsonIgnore]
-    public bool IsMoney => Kind is CashKind.Delivery or CashKind.Return or CashKind.Payout;
+    public bool IsEntry => Kind is CashKind.Delivery or CashKind.Return or CashKind.Payout or CashKind.BalanceSet or CashKind.OrderSkipped;
 }
 
 /// <summary>Деньги в копейках: разбор того, что ввели, и вывод «1 234,56 ₽».</summary>
@@ -82,6 +95,14 @@ public static class Money
         if (decimal.Round(value, 2) != value) return null;
         var kopecks = (long)(value * 100);
         return kopecks > MaxAmount ? null : kopecks;
+    }
+
+    /// <summary>Как <see cref="Parse"/>, но можно и с минусом («-150», «−150»).</summary>
+    public static long? ParseSigned(string? text)
+    {
+        var value = (text ?? "").Trim();
+        var negative = value.StartsWith('-') || value.StartsWith('−');
+        return Parse(negative ? value[1..] : value) is { } amount ? (negative ? -amount : amount) : null;
     }
 
     /// <summary>«1 234,56 ₽».</summary>
@@ -138,11 +159,44 @@ public sealed class Supplier : INotifyPropertyChanged
         set => Set(ref _lastActivity, value);
     }
 
-    /// <summary>Записи о деньгах (поставки, возвраты, погашения), по времени.</summary>
+    /// <summary>Записи о деньгах (поставки, возвраты, погашения, корректировки), по времени.</summary>
     public List<CashEntry> Entries { get; } = new();
 
     /// <summary>По поставщику ещё нет ни одной действующей записи о деньгах — его можно убрать из списка.</summary>
-    public bool CanRemove => Balance == 0 && Entries.All(e => e.IsCancelled);
+    public bool CanRemove => Balance == 0 && Entries.All(e => !e.Counts);
+
+    /// <summary>Подключение к сайту поставщика (последнее), null — не подключён.</summary>
+    public CashOperation? Link { get; set; }
+
+    /// <summary>Заказы и возвраты с сайта, уже учтённые в журнале (по номеру).</summary>
+    public HashSet<string> Recorded { get; } = new();
+
+    private List<ExternalOrder> _pendingOrders = new();
+
+    /// <summary>Заказы с сайта, которые ещё ждут: сколько за них отдали.</summary>
+    public List<ExternalOrder> PendingOrders
+    {
+        get => _pendingOrders;
+        set
+        {
+            var had = _pendingOrders.Count;
+            _pendingOrders = value;
+            if (had == value.Count) return;
+            OnPropertyChanged(nameof(HasPending));
+            OnPropertyChanged(nameof(PendingText));
+        }
+    }
+
+    public bool HasPending => _pendingOrders.Count > 0;
+
+    /// <summary>Для списка поставщиков: «ждут оплаты: 2».</summary>
+    public string PendingText => HasPending ? $"ждут оплаты: {_pendingOrders.Count}" : "";
+
+    /// <summary>Заказы с сайта уже загружены (хотя бы раз с подключения).</summary>
+    public bool SiteLoaded { get; set; }
+
+    /// <summary>Что с сайтом: когда обновили, ошибка входа и т. п.</summary>
+    public string SiteStatus { get; set; } = "";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -165,16 +219,33 @@ public sealed class CashEntry
     /// <summary>Баланс поставщика после этой записи.</summary>
     public long BalanceAfter { get; set; }
 
+    /// <summary>Насколько запись изменила баланс (у корректировки — до заданной суммы).</summary>
+    public long Delta { get; set; }
+
     /// <summary>Запись отменили (кто, когда, почему).</summary>
     public CashOperation? Cancellation { get; set; }
 
+    /// <summary>Тот же заказ или возврат с сайта уже учтён другой записью (например, с другого компьютера).</summary>
+    public bool IsDuplicate { get; set; }
+
     public bool IsCancelled => Cancellation != null;
+
+    /// <summary>Запись учитывается в балансе.</summary>
+    public bool Counts => !IsCancelled && !IsDuplicate;
+
+    /// <summary>Отменить можно действующую запись.</summary>
+    public bool CanCancel => Counts;
+
+    /// <summary>Бледная и зачёркнутая: отменена или повтор.</summary>
+    public bool IsInactive => !Counts;
 
     public string Title => Operation.Kind switch
     {
         CashKind.Delivery => "Поставка",
         CashKind.Return => "Возврат товара",
         CashKind.Payout => "Погашение",
+        CashKind.BalanceSet => "Корректировка баланса",
+        CashKind.OrderSkipped => "Заказ не оплачиваем",
         _ => "",
     };
 
@@ -184,13 +255,15 @@ public sealed class CashEntry
         CashKind.Delivery => $"по накладной {Money.Format(Operation.Due)}, выдано {Money.Format(Operation.Paid)}",
         CashKind.Return => $"на сумму {Money.Format(Operation.Amount)}",
         CashKind.Payout => $"{Money.Format(Operation.Amount)} — вернули деньгами или учли в накладной",
+        CashKind.BalanceSet => $"баланс стал {Money.Format(Operation.Balance)}",
+        CashKind.OrderSkipped => "убран из ожидающих оплаты",
         _ => "",
     };
 
-    public string DeltaText => Money.FormatSigned(Operation.Delta);
-    public bool IsPositive => Operation.Delta > 0;
-    public bool IsNegative => Operation.Delta < 0;
-    public string BalanceAfterText => IsCancelled ? "отменено" : "баланс " + Money.Format(BalanceAfter);
+    public string DeltaText => Operation.Kind == CashKind.OrderSkipped ? "" : Money.FormatSigned(Delta);
+    public bool IsPositive => Delta > 0;
+    public bool IsNegative => Delta < 0;
+    public string BalanceAfterText => IsCancelled ? "отменено" : IsDuplicate ? "повтор — уже учтено" : "баланс " + Money.Format(BalanceAfter);
     public bool HasComment => Operation.Comment.Length > 0;
     public string Comment => Operation.Comment;
 
@@ -204,4 +277,18 @@ public sealed class CashEntry
 
     private static string Who(CashOperation op) =>
         op.Machine.Length > 0 && op.Machine != op.Author ? $"{op.Author} ({op.Machine})" : op.Author;
+}
+
+/// <summary>Заказ на сайте поставщика: номер, когда оформлен, статус и сумма (копейки).</summary>
+public sealed record ExternalOrder(string Number, DateTime Date, string Status, long Sum)
+{
+    public string External => "forum:order:" + Number;
+    public string DateText => Date.ToString("dd.MM.yyyy HH:mm");
+    public string SumText => Money.Format(Sum);
+}
+
+/// <summary>Возврат на сайте поставщика.</summary>
+public sealed record ExternalReturn(string Number, DateTime Date, string Status, string Reason, string Penalty, long Sum)
+{
+    public string External => "forum:return:" + Number;
 }

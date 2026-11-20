@@ -13,6 +13,8 @@ public partial class CashPanel : UserControl
     private CashService? _cash;
     private Supplier? _supplier;
     private CashKind _kind = CashKind.Delivery;
+    // Оплачиваем заказ с сайта поставщика (null — обычная поставка).
+    private ExternalOrder? _order;
 
     public CashPanel()
     {
@@ -71,6 +73,18 @@ public partial class CashPanel : UserControl
             _ => "Баланс нулевой",
         };
         RemoveButton.IsVisible = s.CanRemove;
+        SiteBox.IsVisible = s.Link != null;
+        if (s.Link is { } link)
+        {
+            SiteTitle.Text = !s.SiteLoaded ? "Заказы с сайта: ещё не загружены"
+                : s.PendingOrders.Count > 0 ? $"Заказы с сайта ждут оплаты: {s.PendingOrders.Count}"
+                : "Заказы с сайта: всё оплачено";
+            SiteStatusText.Text = $"Форум-Авто, логин {link.Login}, учёт с {link.Since?.LocalDateTime:dd.MM.yyyy}" +
+                                  (s.SiteStatus.Length > 0 ? " · " + s.SiteStatus : "");
+            PendingList.ItemsSource = s.PendingOrders;
+        }
+        // Заказ, который начали оплачивать, уже оплатили (например, на другой кассе).
+        if (_order != null && !s.PendingOrders.Contains(_order)) SetOrder(null);
         History.ItemsSource = s.Entries.AsEnumerable().Reverse().ToList();
         EmptyText.IsVisible = s.Entries.Count == 0;
         UpdatePreview();
@@ -153,7 +167,8 @@ public partial class CashPanel : UserControl
         switch (_kind)
         {
             case CashKind.Delivery:
-                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment);
+                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment,
+                    _order?.External ?? "");
                 break;
             case CashKind.Return:
                 _cash.RecordReturn(_supplier, Money.Parse(AmountBox.Text)!.Value, comment);
@@ -170,6 +185,85 @@ public partial class CashPanel : UserControl
     private void ClearForm()
     {
         DueBox.Text = PaidBox.Text = AmountBox.Text = CommentBox.Text = "";
+        SetOrder(null);
+    }
+
+    // ---- Заказы с сайта ----
+
+    private void SetOrder(ExternalOrder? order)
+    {
+        _order = order;
+        OrderChip.IsVisible = order != null;
+        OrderChipText.Text = order == null ? "" : $"Оплата заказа №{order.Number} от {order.DateText} — {order.SumText}";
+    }
+
+    private void PayOrder_Click(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is not ExternalOrder order) return;
+        SelectTab(CashKind.Delivery);
+        DueBox.Text = Money.FormatInput(order.Sum);
+        PaidBox.Text = "";
+        CommentBox.Text = $"Заказ №{order.Number} от {order.DateText}";
+        SetOrder(order);
+        PaidBox.Focus();
+    }
+
+    private void ClearOrder_Click(object? sender, RoutedEventArgs e) => SetOrder(null);
+
+    private async void SkipOrder_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_cash == null || _supplier == null || (sender as Control)?.DataContext is not ExternalOrder order ||
+            TopLevel.GetTopLevel(this) is not Window owner) return;
+        var reason = await Dialogs.Input(owner, "Заказ не оплачиваем",
+            $"Заказ №{order.Number} от {order.DateText} на {order.SumText} уберётся из ожидающих оплаты (в истории останется запись). Почему?",
+            "", "Убрать", required: true);
+        if (reason == null) return;
+        _cash.SkipOrder(_supplier, order, reason);
+        Refresh();
+    }
+
+    private async void RefreshSite_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_cash == null) return;
+        RefreshSiteButton.IsEnabled = false;
+        SiteStatusText.Text = "Загружаем заказы с сайта…";
+        try
+        {
+            await _cash.RefreshSitesAsync();
+        }
+        finally
+        {
+            RefreshSiteButton.IsEnabled = true;
+            Refresh();
+        }
+    }
+
+    private async void Site_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_cash == null || _supplier == null || TopLevel.GetTopLevel(this) is not Window owner) return;
+        var link = _supplier.Link;
+        if (await Dialogs.SiteLink(owner, link?.Login ?? "", link != null, link?.Since?.LocalDateTime ?? DateTime.Today) is not { } result)
+            return;
+        if (result.Login.Length == 0)
+        {
+            _cash.Link(_supplier, "", "", DateTime.Today);
+        }
+        else
+        {
+            if (result.StartBalance is { } balance)
+                _cash.SetBalance(_supplier, balance, $"Начальный баланс на {result.Since:dd.MM.yyyy} (подключение сайта)");
+            var password = result.Password.Length > 0 ? result.Password : _cash.PasswordOf(_supplier) ?? "";
+            _cash.Link(_supplier, result.Login, password, result.Since);
+        }
+        Refresh();
+    }
+
+    private async void Correction_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_cash == null || _supplier == null || TopLevel.GetTopLevel(this) is not Window owner) return;
+        if (await Dialogs.Correction(owner, _supplier.Name, _supplier.Balance) is not { } result) return;
+        _cash.SetBalance(_supplier, result.Balance, result.Reason);
+        Refresh();
     }
 
     // ---- Действия ----
@@ -178,8 +272,9 @@ public partial class CashPanel : UserControl
     {
         if (_cash == null || (sender as Control)?.DataContext is not CashEntry entry || TopLevel.GetTopLevel(this) is not Window owner)
             return;
+        var what = entry.Operation.Kind == CashKind.OrderSkipped ? entry.Comment : $"{entry.Title}: {entry.Details} ({entry.DeltaText})";
         var reason = await Dialogs.Input(owner, "Отменить запись",
-            $"{entry.Title}: {entry.Details} ({entry.DeltaText}).\nЗапись останется в истории зачёркнутой. Почему отменяете?",
+            $"{what}.\nЗапись останется в истории зачёркнутой. Почему отменяете?",
             "", "Отменить запись", required: true);
         if (reason == null) return;
         _cash.Cancel(entry, reason);

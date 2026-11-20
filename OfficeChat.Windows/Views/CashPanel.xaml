@@ -26,6 +26,10 @@
         <Border DockPanel.Dock="Top" Padding="16,10" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Content="🌐 Сайт…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Site_Click"
+                            ToolTip="Брать заказы и возвраты с сайта поставщика (Форум-Авто)" />
+                    <Button Content="Корректировка…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Correction_Click"
+                            ToolTip="Задать баланс поставщика (например, начать учёт с известной суммы)" />
                     <Button Content="Переименовать" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Rename_Click" />
                     <Button x:Name="RemoveButton" Content="Убрать из списка" Padding="8,3" FontSize="12" Click="Remove_Click" />
                 </StackPanel>
@@ -34,6 +38,46 @@
                     <TextBlock x:Name="BalanceHint" FontSize="11" Foreground="{StaticResource MutedTextBrush}" TextWrapping="Wrap" />
                 </StackPanel>
             </DockPanel>
+        </Border>
+
+        <!-- Сайт поставщика: заказы, которые ждут оплаты -->
+        <Border x:Name="SiteBox" DockPanel.Dock="Top" Padding="16,8" BorderBrush="#E2E5EA" BorderThickness="0,0,0,1"
+                Background="#F5F9FF" Visibility="Collapsed">
+            <StackPanel>
+                <DockPanel>
+                    <Button x:Name="RefreshSiteButton" DockPanel.Dock="Right" Content="↻ Обновить" Padding="8,2" FontSize="12"
+                            Click="RefreshSite_Click" />
+                    <TextBlock x:Name="SiteTitle" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
+                </DockPanel>
+                <TextBlock x:Name="SiteStatusText" FontSize="11" Margin="0,2,0,4" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}" />
+                <ScrollViewer MaxHeight="170" VerticalScrollBarVisibility="Auto">
+                    <ItemsControl x:Name="PendingList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Margin="0,2" Padding="10,5" CornerRadius="6" Background="White" BorderBrush="#E2E5EA"
+                                        BorderThickness="1">
+                                    <DockPanel>
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding SumText}" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"
+                                                       Margin="0,0,12,0" />
+                                            <Button Content="Оплатить" Padding="10,2" FontSize="12" Margin="0,0,6,0"
+                                                    Style="{StaticResource FlatButton}" Click="PayOrder_Click" />
+                                            <Button Content="Не оплачиваем…" Padding="8,2" FontSize="11" Click="SkipOrder_Click" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Number, StringFormat=Заказ №{0}}" FontSize="13" Margin="0,0,8,0" />
+                                            <TextBlock Text="{Binding DateText}" FontSize="12" Margin="0,0,8,0"
+                                                       Foreground="{StaticResource MutedTextBrush}" />
+                                            <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{StaticResource MutedTextBrush}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </StackPanel>
         </Border>
 
         <!-- Новая запись -->
@@ -77,6 +121,15 @@
                     <TextBlock x:Name="AmountLabel" Style="{StaticResource Label}" Text="Сумма, ₽" />
                     <TextBox x:Name="AmountBox" Style="{StaticResource Amount}" />
                 </StackPanel>
+
+                <!-- Оплата заказа с сайта: какой заказ, и как отказаться -->
+                <Border x:Name="OrderChip" Margin="0,10,0,0" Padding="10,4" CornerRadius="4" Background="#E0ECFF" Visibility="Collapsed">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Content="✕" Padding="6,0" FontSize="11" Click="ClearOrder_Click"
+                                ToolTip="Не связывать с заказом" />
+                        <TextBlock x:Name="OrderChipText" FontSize="12" VerticalAlignment="Center" />
+                    </DockPanel>
+                </Border>
 
                 <TextBlock Style="{StaticResource Label}" Margin="0,10,0,3" Text="Комментарий (накладная, водитель…) — необязательно" />
                 <TextBox x:Name="CommentBox" MaxLength="500" Padding="4,3" />
@@ -125,7 +178,7 @@
                                     <Setter TargetName="Delta" Property="Foreground" Value="#B91C1C" />
                                 </DataTrigger>
                                 <!-- Отменённая: бледная и зачёркнутая, отменить ещё раз нельзя -->
-                                <DataTrigger Binding="{Binding IsCancelled}" Value="True">
+                                <DataTrigger Binding="{Binding IsInactive}" Value="True">
                                     <Setter TargetName="Card" Property="Opacity" Value="0.55" />
                                     <Setter TargetName="Delta" Property="TextDecorations" Value="Strikethrough" />
                                     <Setter TargetName="TitleText" Property="TextDecorations" Value="Strikethrough" />

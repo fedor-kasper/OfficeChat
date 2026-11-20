@@ -139,7 +139,10 @@
                                 <TextBlock DockPanel.Dock="Right" Text="{Binding BalanceText}" FontSize="13" FontWeight="SemiBold"
                                            Margin="8,0,0,0" VerticalAlignment="Center" Classes="balance"
                                            Classes.positive="{Binding IsPositive}" Classes.negative="{Binding IsNegative}" />
-                                <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding PendingText}" FontSize="11" Foreground="#B45309" IsVisible="{Binding HasPending}" />
+                                </StackPanel>
                             </DockPanel>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
