@@ -60,6 +60,7 @@ public sealed class CashService : IDisposable
     private readonly Dictionary<Guid, List<ExternalOrder>> _siteOrders = new();
     private UiTimer? _siteTimer;
     private bool _refreshingSites;
+    private readonly SemaphoreSlim _siteRefreshGate = new(1, 1);
 
     /// <summary>Поставщики по алфавиту (убранные из списка не показываются).</summary>
     public ObservableCollection<Supplier> Suppliers { get; } = new();
@@ -403,12 +404,30 @@ public sealed class CashService : IDisposable
     /// </summary>
     public async Task RefreshSitesAsync()
     {
-        if (_refreshingSites || !_settings.CashMode) return;
+        if (_refreshingSites || !_settings.CashMode)
+        {
+            Log.Info($"Касса: обновление сайтов пропущено — {(_refreshingSites ? "уже выполняется" : "режим кассы выключен")}");
+            return;
+        }
         _refreshingSites = true;
         try
         {
             foreach (var supplier in _suppliers.Values.Where(s => s.Link != null && Suppliers.Contains(s)).ToList())
-                await RefreshSupplierAsync(supplier, null);
+            {
+                var debug = new SiteDebug();
+                debug.Line($"Автоматический отчёт: поставщик «{supplier.Name}», {supplier.Id}; учёт с {supplier.Link?.Since:O}");
+                try
+                {
+                    await RefreshSupplierAsync(supplier, debug);
+                    DescribePending(supplier, debug);
+                }
+                finally
+                {
+                    debug.Line($"Состояние: {supplier.SiteStatus}; карточек в модели: {supplier.PendingOrders.Count}");
+                    try { Log.Info($"Касса: диагностика сайта: {debug.Save(automatic: true)}"); }
+                    catch (Exception ex) { Log.Warn("Касса: не удалось сохранить диагностику сайта", ex); }
+                }
+            }
         }
         finally
         {
@@ -444,6 +463,22 @@ public sealed class CashService : IDisposable
 
     private async Task RefreshSupplierAsync(Supplier supplier, SiteDebug? debug)
     {
+        debug?.Line("Ожидание очереди загрузки сайта");
+        await _siteRefreshGate.WaitAsync();
+        try
+        {
+            if (supplier.Link == null)
+            {
+                debug?.Line("Загрузка пропущена: поставщик отключён от сайта");
+                return;
+            }
+            await RefreshSupplierCoreAsync(supplier, debug);
+        }
+        finally { _siteRefreshGate.Release(); }
+    }
+
+    private async Task RefreshSupplierCoreAsync(Supplier supplier, SiteDebug? debug)
+    {
         var link = supplier.Link!;
         if (UnprotectSecret(link.Secret) is not { } password)
         {
@@ -455,9 +490,13 @@ public sealed class CashService : IDisposable
         try
         {
             var data = await _site.FetchAsync(link.Login, password, link.Since?.Date ?? DateTime.Today, CancellationToken.None, debug);
-            if (supplier.Link != link) return; // пока ходили — переподключили
+            if (supplier.Link != link)
+            {
+                debug?.Line("Ответ не применён: подключение поставщика изменилось во время загрузки");
+                return;
+            }
             _siteOrders[supplier.Id] = data.Orders;
-            var added = ApplyReturns(supplier, data.Returns);
+            var added = ApplyReturns(supplier, data.Returns, debug);
             Rebuild();
             var since = link.Since?.Date ?? DateTime.Today;
             supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm} — заказов с {since:dd.MM}: {data.Orders.Count}, " +
@@ -467,6 +506,7 @@ public sealed class CashService : IDisposable
         }
         catch (SiteException ex)
         {
+            debug?.Line($"ОШИБКА сайта: {ex}");
             supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.Message}";
             Log.Warn($"Касса: сайт {link.Login}: {ex.Message}", ex.InnerException);
         }
@@ -503,13 +543,18 @@ public sealed class CashService : IDisposable
     }
 
     /// <summary>Возвраты «Поставлен на баланс», которых ещё нет в журнале, — записать. Возвращает, сколько записали.</summary>
-    private int ApplyReturns(Supplier supplier, List<ExternalReturn> returns)
+    private int ApplyReturns(Supplier supplier, List<ExternalReturn> returns, SiteDebug? debug = null)
     {
         var since = supplier.Link?.Since?.Date ?? DateTime.Today;
         var added = 0;
-        foreach (var item in returns.Where(r => IsCreditedReturn(r) && r.Date >= since && r.Sum > 0 && !supplier.Recorded.Contains(r.External))
-                     .OrderBy(r => r.Date))
+        foreach (var item in returns.OrderBy(r => r.Date))
         {
+            var why = !IsCreditedReturn(item) ? "статус не «на баланс»"
+                : item.Date < since ? "раньше даты начала учёта"
+                : item.Sum <= 0 ? "сумма не положительная"
+                : supplier.Recorded.Contains(item.External) ? "уже записан в журнале" : null;
+            debug?.Line($"Возврат {item.Number}, {item.Date:dd.MM.yyyy}, «{item.Status}», {Money.Format(item.Sum)}: {why ?? "записываем на баланс"}");
+            if (why != null) continue;
             var penalty = item.Penalty is "" or "0" ? "" : $", штраф {item.Penalty}";
             RecordReturn(supplier, item.Sum, $"Возврат №{item.Number} от {item.Date:dd.MM.yyyy} ({item.Reason}{penalty}) — с сайта", item.External);
             added++;

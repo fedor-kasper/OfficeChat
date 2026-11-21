@@ -23,7 +23,7 @@ public interface ISupplierSite
 }
 
 /// <summary>
-/// Отладочный отчёт о походе на сайт: каждый запрос и ответ (страница целиком — как пришла), разбор таблиц
+/// Отладочный отчёт о походе на сайт: каждый запрос и ответ (HTML в UTF-8 с удалёнными секретами), разбор таблиц
 /// построчно и итог. Сохраняется одним zip-файлом в папку журналов — его можно переслать разработчику.
 /// Пароль и значения cookies в отчёт не попадают.
 /// </summary>
@@ -32,6 +32,19 @@ public sealed class SiteDebug
     private readonly StringBuilder _log = new();
     private readonly List<(string Name, byte[] Data)> _files = new();
     private int _counter;
+    private readonly HashSet<string> _secrets = new(StringComparer.Ordinal);
+
+    public void HideSecret(string value)
+    {
+        if (!string.IsNullOrEmpty(value)) _secrets.Add(value);
+    }
+
+    private string Redact(string text)
+    {
+        foreach (var secret in _secrets.OrderByDescending(s => s.Length))
+            text = text.Replace(secret, "[скрыто]", StringComparison.Ordinal);
+        return text;
+    }
 
     public SiteDebug() => Line($"Отладочный отчёт OfficeChat {typeof(SiteDebug).Assembly.GetName().Version}, {DateTime.Now:dd.MM.yyyy HH:mm:ss}, " +
                                $"{Environment.OSVersion}, .NET {Environment.Version}");
@@ -46,18 +59,37 @@ public sealed class SiteDebug
         return file;
     }
 
+    public string AddHtml(string name, string html)
+    {
+        // Поля входа и CSRF не нужны для анализа таблиц. Удаляем значения независимо от порядка атрибутов.
+        html = Regex.Replace(html, @"<(?:input|meta)\b[^>]*>", match =>
+            Regex.IsMatch(match.Value, @"(?:password|csrf|token)", RegexOptions.IgnoreCase)
+                ? Regex.Replace(match.Value, @"\b(value|content)\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+)", "$1=\"[скрыто]\"", RegexOptions.IgnoreCase)
+                : match.Value, RegexOptions.IgnoreCase);
+        // Файлы отчёта всегда UTF-8, исходная кодировка указана в report.txt.
+        html = Regex.Replace(html, @"charset\s*=\s*([""']?)[\w-]+", m => "charset=" + m.Groups[1].Value + "utf-8", RegexOptions.IgnoreCase);
+        return AddFile(name, Encoding.UTF8.GetBytes(Redact(html)));
+    }
+
     /// <summary>Сохранить отчёт: report.txt и приложенные страницы — в zip в папке журналов. Возвращает путь.</summary>
-    public string Save()
+    public string Save(bool automatic = false)
     {
         Directory.CreateDirectory(Log.Folder);
-        var path = Path.Combine(Log.Folder, $"forum-debug-{DateTime.Now:yyyy-MM-dd-HHmmss}.zip");
+        if (automatic)
+        {
+            foreach (var old in new DirectoryInfo(Log.Folder).GetFiles("forum-debug-auto-*.zip")
+                         .OrderByDescending(f => f.CreationTimeUtc).Skip(19))
+                try { old.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        }
+        var path = Path.Combine(Log.Folder, $"forum-debug-{(automatic ? "auto-" : "")}{DateTime.Now:yyyy-MM-dd-HHmmss-fff}-{Guid.NewGuid():N}.zip");
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         using (var report = new StreamWriter(zip.CreateEntry("report.txt").Open(), new UTF8Encoding(true)))
-            report.Write(_log.ToString());
+            report.Write(Redact(_log.ToString()));
         foreach (var (name, data) in _files)
         {
             using var entry = zip.CreateEntry(name).Open();
-            entry.Write(data);
+            entry.Write(name.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+                ? Encoding.UTF8.GetBytes(Redact(Encoding.UTF8.GetString(data))) : data);
         }
         return path;
     }
@@ -86,6 +118,9 @@ public sealed class ForumAutoSite : ISupplierSite
     public async Task<SiteData> FetchAsync(string login, string password, DateTime since, CancellationToken cancel,
         SiteDebug? debug = null)
     {
+        debug?.HideSecret(password);
+        debug?.HideSecret(WebUtility.HtmlEncode(password));
+        debug?.HideSecret(HttpUtility.UrlEncode(password, Cp1251));
         var cookies = new CookieContainer();
         using var handler = new HttpClientHandler { CookieContainer = cookies, AllowAutoRedirect = true };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(60) };
@@ -96,6 +131,7 @@ public sealed class ForumAutoSite : ISupplierSite
             // Вход: та же форма, что на главной странице.
             var start = await GetAsync(http, "/shop/index.html", cancel, debug, "index");
             var csrf = ForumAutoParser.CsrfToken(start);
+            debug?.HideSecret(csrf);
             debug?.Line($"csrf_token на странице входа: {(csrf.Length > 0 ? $"есть ({csrf.Length} символов)" : "нет")}; " +
                         $"форма входа на странице: {(ForumAutoParser.IsLoginPage(start) ? "есть" : "нет")}");
             var form = new StringBuilder();
@@ -108,7 +144,7 @@ public sealed class ForumAutoSite : ISupplierSite
                     shown.Append('&');
                 }
                 form.Append(name).Append('=').Append(HttpUtility.UrlEncode(value, Cp1251));
-                shown.Append(name).Append('=').Append(name == "password" ? "***" : HttpUtility.UrlEncode(value, Cp1251));
+                shown.Append(name).Append('=').Append(name is "password" or "csrf_token" ? "***" : HttpUtility.UrlEncode(value, Cp1251));
             }
             Field("csrf_token", csrf);
             Field("login", login);
@@ -148,15 +184,30 @@ public sealed class ForumAutoSite : ISupplierSite
                         : $"Вместо архива заказов сайт показал другую страницу — она сохранена: {saved}");
                 }
                 orders.AddRange(rows.Where(o => o.Date >= since));
+                foreach (var row in rows.Where(o => o.Date < since))
+                    debug?.Line($"  заказ {row.Number} {row.Date:O}: пропущен — раньше даты начала учёта {since:O}");
                 // Заказы — от новых к старым: дошли до даты начала учёта или страницы кончились.
-                if (rows.Count == 0 || rows.Min(o => o.Date) < since || page >= ForumAutoParser.PageCount(html)) break;
+                var stop = rows.Count == 0 ? "нет разобранных строк"
+                    : rows.Min(o => o.Date) < since ? "достигнута дата начала учёта"
+                    : page >= ForumAutoParser.PageCount(html) ? "последняя страница"
+                    : page == MaxArchivePages ? $"достигнут лимит {MaxArchivePages} страниц; архив прочитан не полностью"
+                    : null;
+                if (stop != null)
+                {
+                    debug?.Line($"Архив: остановка — {stop}");
+                    break;
+                }
             }
 
             var returnsHtml = await GetAsync(http, "/shop/returns/index.html", cancel, debug, "returns");
+            if (ForumAutoParser.IsLoginPage(returnsHtml))
+                throw new SiteException("Вместо возвратов сайт показал форму входа — сессия авторизации потеряна");
             var allReturns = ForumAutoParser.ParseReturns(returnsHtml, debug);
             if (allReturns.Count == 0 && returnsHtml.Contains("/returns/", StringComparison.OrdinalIgnoreCase))
                 Log.Warn($"Касса: на странице возвратов не нашли ни одного возврата — страница сохранена: {SaveForDiagnostics("forum-returns.html", returnsHtml)}");
             var returns = allReturns.Where(r => r.Date >= since.Date).ToList();
+            foreach (var item in allReturns.Where(r => r.Date < since.Date))
+                debug?.Line($"  возврат {item.Number} {item.Date:O}: пропущен — раньше даты начала учёта {since:O}");
             debug?.Line($"Возвраты: разобрано {allReturns.Count}, с {since:dd.MM.yyyy} — {returns.Count}, " +
                         $"из них «на баланс» — {returns.Count(r => r.Status.Contains("на баланс", StringComparison.OrdinalIgnoreCase))}");
             var result = new SiteData(orders.DistinctBy(o => o.Number).ToList(), returns);
@@ -212,7 +263,7 @@ public sealed class ForumAutoSite : ISupplierSite
         var html = encoding.GetString(bytes);
         if (debug != null)
         {
-            var file = debug.AddFile(name + ".html", bytes);
+            var file = debug.AddHtml(name + ".html", html);
             var setCookies = response.Headers.TryGetValues("Set-Cookie", out var values)
                 ? string.Join(", ", values.Select(v => v.Split('=')[0])) : "нет";
             debug.Line($"  ответ {(int)response.StatusCode} {response.ReasonPhrase}, итоговый адрес {response.RequestMessage?.RequestUri}, " +
@@ -337,8 +388,9 @@ public static partial class ForumAutoParser
                 continue;
             }
             result.Add(new ExternalOrder(number, date, cells[dateIndex + 1], sum));
+            debug?.Line($"    строка {index}: заказ {number}, {date:O}, «{cells[dateIndex + 1]}», {Money.Format(sum)} — разобран");
         }
-        debug?.Line($"    разбор заказов: строк таблиц {index}, со ссылкой на заказ — {Regex.Count(html, @"paid_view\.html\?paid=", RegexOptions.IgnoreCase)}, " +
+        debug?.Line($"    разбор заказов: строк таблиц {index}, со ссылкой на заказ — {OrderLinkRegex().Count(html)}, " +
                     $"разобрано {result.Count}");
         return result;
     }
