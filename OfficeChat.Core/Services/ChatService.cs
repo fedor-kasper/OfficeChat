@@ -23,6 +23,7 @@ public sealed partial class ChatService : IDisposable
     private const int PageSize = 200;
 
     private readonly AppSettings _settings;
+    private bool _disposed;
     private readonly HistoryStore _store;
     private readonly DiscoveryService _discovery;
     private readonly MessagingService _messaging;
@@ -756,6 +757,7 @@ public sealed partial class ChatService : IDisposable
 
     private void FlushAll()
     {
+        if (_disposed) return;
         foreach (var peerId in _contactsByPeer.Keys
                      .Concat(_outbox.Select(o => o.PeerId))
                      .Concat(_store.PeersWithPendingGroupDeliveries())
@@ -1228,6 +1230,8 @@ public sealed partial class ChatService : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _ = DisposeServerAsync();
         _retryTimer.Stop();
         _typingTimer.Stop();
