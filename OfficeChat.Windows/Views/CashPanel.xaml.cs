@@ -20,8 +20,6 @@ public partial class CashPanel : UserControl
     private CashService? _cash;
     private Supplier? _supplier;
     private CashKind _kind = CashKind.Delivery;
-    // Оплачиваем заказ с сайта поставщика (null — обычная поставка).
-    private ExternalOrder? _order;
 
     public CashPanel()
     {
@@ -83,8 +81,7 @@ public partial class CashPanel : UserControl
                                   (s.SiteStatus.Length > 0 ? " · " + s.SiteStatus : "");
             PendingList.ItemsSource = s.PendingOrders;
         }
-        // Заказ, который начали оплачивать, уже оплатили (например, на другой кассе).
-        if (_order != null && !s.PendingOrders.Contains(_order)) SetOrder(null);
+
         History.ItemsSource = s.Entries.AsEnumerable().Reverse().ToList();
         EmptyText.Visibility = s.Entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         UpdatePreview();
@@ -173,8 +170,7 @@ public partial class CashPanel : UserControl
         switch (_kind)
         {
             case CashKind.Delivery:
-                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment,
-                    _order?.External ?? "");
+                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment);
                 break;
             case CashKind.Return:
                 _cash.RecordReturn(_supplier, Money.Parse(AmountBox.Text)!.Value, comment);
@@ -188,33 +184,54 @@ public partial class CashPanel : UserControl
         FocusAmount();
     }
 
-    private void ClearForm()
-    {
-        DueBox.Text = PaidBox.Text = AmountBox.Text = CommentBox.Text = "";
-        SetOrder(null);
-    }
+    private void ClearForm() => DueBox.Text = PaidBox.Text = AmountBox.Text = CommentBox.Text = "";
 
     // ---- Заказы с сайта ----
 
-    private void SetOrder(ExternalOrder? order)
+    // Карточка заказа: поле «Выдано водителю» и подсказка рядом с кнопкой (по Tag в той же строке).
+    private static (TextBox? Box, TextBlock? Preview) OrderInputs(object sender) =>
+        (sender as FrameworkElement)?.Parent is Panel row
+            ? (row.Children.OfType<TextBox>().FirstOrDefault(), row.Children.OfType<TextBlock>().FirstOrDefault(t => Equals(t.Tag, "preview")))
+            : (null, null);
+
+    private void OrderPaid_TextChanged(object sender, TextChangedEventArgs e)
     {
-        _order = order;
-        OrderChip.Visibility = order != null ? Visibility.Visible : Visibility.Collapsed;
-        OrderChipText.Text = order == null ? "" : $"Оплата заказа №{order.Number} от {order.DateText} — {order.SumText}";
+        if ((sender as FrameworkElement)?.DataContext is not ExternalOrder order || OrderInputs(sender) is not ({ } box, { } preview)) return;
+        var paid = Money.Parse(box.Text);
+        var delta = paid - order.Sum;
+        preview.Text = string.IsNullOrWhiteSpace(box.Text) ? ""
+            : delta is not { } d ? "сумма — число, например 15 900"
+            : d > 0 ? $"на баланс {Money.FormatSigned(d)}"
+            : d < 0 ? $"с баланса {Money.FormatSigned(d)}"
+            : "без сдачи";
+        preview.Foreground = delta is null ? Red : delta >= 0 ? Green : Amber;
     }
 
-    private void PayOrder_Click(object sender, RoutedEventArgs e)
+    private void OrderPaid_KeyDown(object sender, KeyEventArgs e)
     {
-        if ((sender as FrameworkElement)?.DataContext is not ExternalOrder order) return;
-        SelectTab(CashKind.Delivery);
-        DueBox.Text = Money.FormatInput(order.Sum);
-        PaidBox.Text = "";
-        CommentBox.Text = $"Заказ №{order.Number} от {order.DateText}";
-        SetOrder(order);
-        Dispatcher.BeginInvoke(() => PaidBox.Focus(), System.Windows.Threading.DispatcherPriority.Input);
+        if (e.Key == Key.Enter) RecordOrder(sender);
     }
 
-    private void ClearOrder_Click(object sender, RoutedEventArgs e) => SetOrder(null);
+    private void OrderRecord_Click(object sender, RoutedEventArgs e) => RecordOrder(sender);
+
+    /// <summary>Записать оплату заказа с сайта: по накладной — сумма заказа, выдано — что ввели в карточке.</summary>
+    private void RecordOrder(object sender)
+    {
+        if (_cash == null || _supplier == null || (sender as FrameworkElement)?.DataContext is not ExternalOrder order ||
+            OrderInputs(sender) is not ({ } box, var preview)) return;
+        if (Money.Parse(box.Text) is not { } paid)
+        {
+            if (preview != null)
+            {
+                preview.Text = "введите, сколько отдали водителю";
+                preview.Foreground = Red;
+            }
+            box.Focus();
+            return;
+        }
+        _cash.RecordDelivery(_supplier, order.Sum, paid, $"Заказ №{order.Number} от {order.DateText}", order.External);
+        Refresh();
+    }
 
     private void SkipOrder_Click(object sender, RoutedEventArgs e)
     {

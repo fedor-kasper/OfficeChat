@@ -189,7 +189,7 @@
                                            FontWeight="SemiBold" Margin="8,0,0,0" VerticalAlignment="Center" Foreground="#374151" />
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding PendingText}" FontSize="11" Foreground="#B45309"
+                                    <TextBlock Text="{Binding PendingText}" FontSize="11" FontWeight="SemiBold" Foreground="#DC2626"
                                                Visibility="{Binding HasPending, Converter={StaticResource BoolToVisibility}}" />
                                 </StackPanel>
                             </DockPanel>

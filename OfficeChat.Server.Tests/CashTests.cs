@@ -282,6 +282,41 @@ public class CashTests : IDisposable
         Assert.Equal("abc123", ForumAutoParser.CsrfToken(login));
     }
 
+    [Fact]
+    public void Forum_auto_parser_tolerates_raw_markup()
+    {
+        // Как может отдавать сервер: заглавные теги, одинарные кавычки, незакрытые ячейки и строки, <br> в дате.
+        const string archive = """
+            <H1>Архив заказов</H1><TABLE>
+            <TR class='w' onmouseover="hl(this)"><TD class=td align=center><A HREF='paid_view.html?paid=1001'>50000021</A>
+            <TD class=td>21.11.2026<br>
+            09:15:00<TD class=td>Выдан<TD class=td>15&nbsp;846.40<TD class=td>MSK
+            <TR class='w'><TD><a href="/shop/paid_view.html?paid=1002">50000022</a><TD>20.11.2026 23:51<TD>Собран<TD>118.4
+            </TABLE>
+            """;
+        var orders = ForumAutoParser.ParseOrders(archive);
+        Assert.Equal(new[]
+        {
+            new ExternalOrder("50000021", new DateTime(2026, 11, 21, 9, 15, 0), "Выдан", 1584640),
+            new ExternalOrder("50000022", new DateTime(2026, 11, 20, 23, 51, 0), "Собран", 11840),
+        }, orders);
+    }
+
+    [Fact]
+    public async Task Manual_delivery_closes_the_matching_site_order()
+    {
+        var site = new FakeSite();
+        var cash = Create("Касса", site: site);
+        var forum = cash.AddSupplier("Форум-Авто");
+        // Поставку записали вручную, а заказ с сайта подтянулся позже — второй раз его не ждём.
+        cash.RecordDelivery(forum, 1584640, 1560000, "");
+        site.Orders.Add(new ExternalOrder("50000021", DateTime.Now.AddHours(-2), "Выдан", 1584640));
+        site.Orders.Add(new ExternalOrder("50000022", DateTime.Now.AddHours(-1), "Выдан", 1584640)); // та же сумма — но ручная одна
+        cash.Link(forum, "shop-1", "secret", DateTime.Today);
+        await cash.RefreshSitesAsync();
+        Assert.Equal(new[] { "50000022" }, forum.PendingOrders.Select(o => o.Number));
+    }
+
     // ---- Сеть в памяти ----
 
     private sealed class FakeNetwork

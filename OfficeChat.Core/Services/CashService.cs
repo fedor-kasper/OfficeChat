@@ -376,9 +376,20 @@ public sealed class CashService : IDisposable
             supplier.PendingOrders = new();
             return;
         }
-        supplier.PendingOrders = orders
-            .Where(o => o.Date >= since.Date && o.Sum > 0 && !IsCancelledStatus(o.Status) && !supplier.Recorded.Contains(o.External))
-            .OrderBy(o => o.Date).ToList();
+        // Поставки, записанные вручную (без номера заказа), — тоже оплата: такой заказ (та же сумма, записан после
+        // оформления) больше не ждёт. Каждая ручная поставка закрывает один заказ.
+        var manual = supplier.Entries
+            .Where(e => e.Counts && e.Operation.Kind == CashKind.Delivery && e.Operation.External.Length == 0)
+            .Select(e => e.Operation).ToList();
+        var pending = new List<ExternalOrder>();
+        foreach (var order in orders.Where(o => o.Date >= since.Date && o.Sum > 0 && !IsCancelledStatus(o.Status) &&
+                                                !supplier.Recorded.Contains(o.External)).OrderBy(o => o.Date))
+        {
+            var paid = manual.FirstOrDefault(m => m.Due == order.Sum && m.CreatedAt.LocalDateTime >= order.Date.AddHours(-1));
+            if (paid != null) manual.Remove(paid);
+            else pending.Add(order);
+        }
+        supplier.PendingOrders = pending;
     }
 
     private static bool IsCancelledStatus(string status) => status.Contains("Аннулир", StringComparison.OrdinalIgnoreCase);
@@ -412,7 +423,10 @@ public sealed class CashService : IDisposable
                     _siteOrders[supplier.Id] = data.Orders;
                     var added = ApplyReturns(supplier, data.Returns);
                     Rebuild();
-                    supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm}" + (added > 0 ? $", новых возвратов: {added}" : "");
+                    var since = link.Since?.Date ?? DateTime.Today;
+                    supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm} — заказов с {since:dd.MM}: {data.Orders.Count}, " +
+                                          $"возвратов на баланс: {data.Returns.Count(IsCreditedReturn)}" +
+                                          (added > 0 ? $" (новых: {added})" : "");
                     Log.Info($"Касса: сайт {link.Login} — заказов {data.Orders.Count}, возвратов {data.Returns.Count}, новых возвратов {added}");
                 }
                 catch (SiteException ex)

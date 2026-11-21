@@ -141,7 +141,7 @@
                                            Classes.positive="{Binding IsPositive}" Classes.negative="{Binding IsNegative}" />
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Text="{Binding PendingText}" FontSize="11" Foreground="#B45309" IsVisible="{Binding HasPending}" />
+                                    <TextBlock Text="{Binding PendingText}" FontSize="11" FontWeight="SemiBold" Foreground="#DC2626" IsVisible="{Binding HasPending}" />
                                 </StackPanel>
                             </DockPanel>
                         </DataTemplate>

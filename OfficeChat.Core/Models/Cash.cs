@@ -190,7 +190,7 @@ public sealed class Supplier : INotifyPropertyChanged
     public bool HasPending => _pendingOrders.Count > 0;
 
     /// <summary>Для списка поставщиков: «ждут оплаты: 2».</summary>
-    public string PendingText => HasPending ? $"ждут оплаты: {_pendingOrders.Count}" : "";
+    public string PendingText => HasPending ? $"⚠ ждут оплаты: {_pendingOrders.Count}" : "";
 
     /// <summary>Заказы с сайта уже загружены (хотя бы раз с подключения).</summary>
     public bool SiteLoaded { get; set; }
