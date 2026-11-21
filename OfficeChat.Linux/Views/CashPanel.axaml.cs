@@ -258,6 +258,33 @@ public partial class CashPanel : UserControl
         }
     }
 
+    /// <summary>Отладочный отчёт о сайте: zip в папке журналов — показать, где лежит.</summary>
+    private async void DebugSite_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_cash == null || _supplier == null || TopLevel.GetTopLevel(this) is not Window owner) return;
+        DebugSiteButton.IsEnabled = RefreshSiteButton.IsEnabled = false;
+        SiteStatusText.Text = "Собираем отладочный отчёт: заходим на сайт…";
+        string path;
+        try
+        {
+            path = await _cash.DebugSiteAsync(_supplier);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Не удалось сохранить отладочный отчёт", ex);
+            await Dialogs.Info(owner, "Не удалось сохранить отладочный отчёт: " + ex.Message);
+            return;
+        }
+        finally
+        {
+            DebugSiteButton.IsEnabled = RefreshSiteButton.IsEnabled = true;
+            Refresh();
+        }
+        await Dialogs.Info(owner, $"Отладочный отчёт сохранён:\n{path}\n\nПришлите этот файл разработчику. " +
+                                  "В нём страницы сайта (заказы и возвраты) и ход разбора; пароля в нём нет.");
+        await FileActions.ShowInFolderAsync(new ChatMessage { Id = Guid.NewGuid(), IsOutgoing = false, Text = "", Timestamp = DateTime.Now, FilePath = path }, owner);
+    }
+
     private async void Site_Click(object? sender, RoutedEventArgs e)
     {
         if (_cash == null || _supplier == null || TopLevel.GetTopLevel(this) is not Window owner) return;

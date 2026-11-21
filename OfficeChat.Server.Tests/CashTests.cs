@@ -146,7 +146,7 @@ public class CashTests : IDisposable
         public string? Error { get; set; }
         public (string Login, string Password, DateTime Since)? Last { get; private set; }
 
-        public Task<SiteData> FetchAsync(string login, string password, DateTime since, CancellationToken cancel)
+        public Task<SiteData> FetchAsync(string login, string password, DateTime since, CancellationToken cancel, SiteDebug? debug = null)
         {
             Last = (login, password, since);
             if (Error != null) throw new SiteException(Error);

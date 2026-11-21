@@ -59,6 +59,9 @@
                 <DockPanel>
                     <Button x:Name="RefreshSiteButton" DockPanel.Dock="Right" Content="↻ Обновить" Padding="8,2" FontSize="12"
                             Click="RefreshSite_Click" />
+                    <Button x:Name="DebugSiteButton" DockPanel.Dock="Right" Content="🐞 Отладка" Padding="8,2" FontSize="12"
+                            Margin="0,0,6,0" Click="DebugSite_Click"
+                            ToolTip.Tip="Сходить на сайт и сохранить всё, что пришло, в файл для разработчика (пароль туда не попадает)" />
                     <TextBlock x:Name="SiteTitle" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" />
                 </DockPanel>
                 <TextBlock x:Name="SiteStatusText" FontSize="11" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />

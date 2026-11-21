@@ -408,38 +408,97 @@ public sealed class CashService : IDisposable
         try
         {
             foreach (var supplier in _suppliers.Values.Where(s => s.Link != null && Suppliers.Contains(s)).ToList())
-            {
-                var link = supplier.Link!;
-                if (UnprotectSecret(link.Secret) is not { } password)
-                {
-                    supplier.SiteStatus = "Не удалось расшифровать пароль сайта (сменили код кассы?) — подключите сайт заново";
-                    Changed?.Invoke();
-                    continue;
-                }
-                try
-                {
-                    var data = await _site.FetchAsync(link.Login, password, link.Since?.Date ?? DateTime.Today, CancellationToken.None);
-                    if (supplier.Link != link) continue; // пока ходили — переподключили
-                    _siteOrders[supplier.Id] = data.Orders;
-                    var added = ApplyReturns(supplier, data.Returns);
-                    Rebuild();
-                    var since = link.Since?.Date ?? DateTime.Today;
-                    supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm} — заказов с {since:dd.MM}: {data.Orders.Count}, " +
-                                          $"возвратов на баланс: {data.Returns.Count(IsCreditedReturn)}" +
-                                          (added > 0 ? $" (новых: {added})" : "");
-                    Log.Info($"Касса: сайт {link.Login} — заказов {data.Orders.Count}, возвратов {data.Returns.Count}, новых возвратов {added}");
-                }
-                catch (SiteException ex)
-                {
-                    supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.Message}";
-                    Log.Warn($"Касса: сайт {link.Login}: {ex.Message}", ex.InnerException);
-                }
-                Changed?.Invoke();
-            }
+                await RefreshSupplierAsync(supplier, null);
         }
         finally
         {
             _refreshingSites = false;
+        }
+    }
+
+    /// <summary>
+    /// Отладочный отчёт: сходить на сайт поставщика, записывая всё, что пришло и как разобрано, и почему каждый заказ
+    /// ждёт или не ждёт оплаты. Возвращает путь к zip-файлу в папке журналов.
+    /// </summary>
+    public async Task<string> DebugSiteAsync(Supplier supplier)
+    {
+        var debug = new SiteDebug();
+        debug.Line($"Касса: компьютер {Environment.MachineName}, код кассы {(_settings.CashCode.Length > 0 ? "задан" : "не задан")}, " +
+                   $"записей в журнале {_ops.Count}, поставщик «{supplier.Name}», баланс {Money.Format(supplier.Balance)}");
+        if (supplier.Link is not { } link)
+            debug.Line("Поставщик не подключён к сайту (кнопка «🌐 Сайт…»)");
+        else
+        {
+            debug.Line($"Подключение: сайт {link.Name}, логин «{link.Login}», учёт с {link.Since?.LocalDateTime:dd.MM.yyyy}, " +
+                       $"подключил {link.Author} ({link.Machine}) {link.CreatedAt.LocalDateTime:dd.MM.yyyy HH:mm}");
+            debug.Line($"Уже учтены с сайта: {string.Join(", ", supplier.Recorded.DefaultIfEmpty("нет"))}");
+            if (_refreshingSites) debug.Line("Внимание: в это время уже шло обычное обновление");
+            await RefreshSupplierAsync(supplier, debug);
+            debug.Line($"Состояние после обновления: «{supplier.SiteStatus}»");
+            DescribePending(supplier, debug);
+        }
+        var path = debug.Save();
+        Log.Info($"Касса: отладочный отчёт сайта сохранён: {path}");
+        return path;
+    }
+
+    private async Task RefreshSupplierAsync(Supplier supplier, SiteDebug? debug)
+    {
+        var link = supplier.Link!;
+        if (UnprotectSecret(link.Secret) is not { } password)
+        {
+            supplier.SiteStatus = "Не удалось расшифровать пароль сайта (сменили код кассы?) — подключите сайт заново";
+            debug?.Line(supplier.SiteStatus);
+            Changed?.Invoke();
+            return;
+        }
+        try
+        {
+            var data = await _site.FetchAsync(link.Login, password, link.Since?.Date ?? DateTime.Today, CancellationToken.None, debug);
+            if (supplier.Link != link) return; // пока ходили — переподключили
+            _siteOrders[supplier.Id] = data.Orders;
+            var added = ApplyReturns(supplier, data.Returns);
+            Rebuild();
+            var since = link.Since?.Date ?? DateTime.Today;
+            supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm} — заказов с {since:dd.MM}: {data.Orders.Count}, " +
+                                  $"возвратов на баланс: {data.Returns.Count(IsCreditedReturn)}" +
+                                  (added > 0 ? $" (новых: {added})" : "");
+            Log.Info($"Касса: сайт {link.Login} — заказов {data.Orders.Count}, возвратов {data.Returns.Count}, новых возвратов {added}");
+        }
+        catch (SiteException ex)
+        {
+            supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.Message}";
+            Log.Warn($"Касса: сайт {link.Login}: {ex.Message}", ex.InnerException);
+        }
+        catch (Exception ex) when (debug != null)
+        {
+            // В отладке любая ошибка — в отчёт (и на экран), а не падение программы.
+            supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.GetType().Name}: {ex.Message}";
+            debug.Line($"НЕОЖИДАННАЯ ОШИБКА: {ex}");
+            Log.Error("Касса: ошибка при отладке сайта", ex);
+        }
+        Changed?.Invoke();
+    }
+
+    /// <summary>Для отчёта: по каждому заказу с сайта — ждёт ли он оплаты, а если нет, то почему.</summary>
+    private void DescribePending(Supplier supplier, SiteDebug debug)
+    {
+        if (!_siteOrders.TryGetValue(supplier.Id, out var orders))
+        {
+            debug.Line("Заказы с сайта не получены");
+            return;
+        }
+        var since = supplier.Link?.Since?.Date ?? DateTime.Today;
+        debug.Line($"Заказов получено: {orders.Count}, ждут оплаты: {supplier.PendingOrders.Count}");
+        foreach (var order in orders.OrderBy(o => o.Date))
+        {
+            var why = supplier.PendingOrders.Contains(order) ? "ЖДЁТ ОПЛАТЫ"
+                : order.Date < since ? "раньше даты начала учёта"
+                : order.Sum <= 0 ? "сумма 0"
+                : IsCancelledStatus(order.Status) ? "аннулирован"
+                : supplier.Recorded.Contains(order.External) ? "уже записан в журнале"
+                : "закрыт поставкой, записанной вручную на ту же сумму";
+            debug.Line($"  заказ {order.Number} {order.Date:dd.MM.yyyy HH:mm} «{order.Status}» {order.SumText}: {why}");
         }
     }
 
