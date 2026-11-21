@@ -149,6 +149,21 @@ public sealed class Supplier : INotifyPropertyChanged
     }
 
     public string BalanceText => Money.Format(Balance);
+    /// <summary>Баланс сайта в наших знаках: минус — наш долг. null — сайт не сообщил сумму.</summary>
+    public long? SiteBalance { get; set; }
+    public DateTime? SiteBalanceUpdatedAt { get; set; }
+    public bool SiteBalanceStale { get; set; }
+    public string SiteBalanceSource { get; set; } = "";
+    public List<ExternalPayment> SitePayments { get; set; } = new();
+
+    public static string DescribeBalance(long balance) => balance < 0
+        ? $"мы должны {Money.Format(-balance)}"
+        : balance > 0 ? $"нам должны {Money.Format(balance)}" : "0,00 ₽";
+
+    public string SiteBalanceText => SiteBalance is { } value
+        ? $"На сайте: {DescribeBalance(value)} · {SiteBalanceSource} · {SiteBalanceUpdatedAt:dd.MM HH:mm}" +
+          (SiteBalanceStale ? " (последние данные, обновить не удалось)" : "")
+        : "На сайте: баланс ещё не получен";
     public bool IsPositive => Balance > 0;
     public bool IsNegative => Balance < 0;
 
@@ -282,7 +297,8 @@ public sealed class CashEntry
 /// <summary>Заказ на сайте поставщика: номер, когда оформлен, статус и сумма (копейки).</summary>
 public sealed record ExternalOrder(string Number, DateTime Date, string Status, long Sum)
 {
-    public string External => "forum:order:" + Number;
+    public string? ExternalKey { get; init; }
+    public string External => ExternalKey ?? "forum:order:" + Number;
     public string DateText => Date.ToString("dd.MM.yyyy HH:mm");
     public string SumText => Money.Format(Sum);
 }
@@ -290,5 +306,12 @@ public sealed record ExternalOrder(string Number, DateTime Date, string Status, 
 /// <summary>Возврат на сайте поставщика.</summary>
 public sealed record ExternalReturn(string Number, DateTime Date, string Status, string Reason, string Penalty, long Sum)
 {
-    public string External => "forum:return:" + Number;
+    public string? ExternalKey { get; init; }
+    public string External => ExternalKey ?? "forum:return:" + Number;
+}
+
+/// <summary>Оплата на сайте — для сверки, не повторная запись в кассе.</summary>
+public sealed record ExternalPayment(string Number, DateTime Date, long Sum)
+{
+    public string Display => $"{Date:dd.MM.yyyy HH:mm} · {Number} · {Money.Format(Sum)}";
 }

@@ -10,7 +10,12 @@ using OfficeChat.Models;
 namespace OfficeChat.Services;
 
 /// <summary>Что взяли с сайта поставщика: заказы и возвраты.</summary>
-public sealed record SiteData(List<ExternalOrder> Orders, List<ExternalReturn> Returns);
+public sealed record SiteData(List<ExternalOrder> Orders, List<ExternalReturn> Returns)
+{
+    public long? Balance { get; init; }
+    public string BalanceSource { get; init; } = "";
+    public List<ExternalPayment> Payments { get; init; } = new();
+}
 
 /// <summary>Сайт поставщика, с которого касса сама берёт заказы и возвраты (в тестах — подмена).</summary>
 public interface ISupplierSite
@@ -33,6 +38,7 @@ public sealed class SiteDebug
     private readonly List<(string Name, byte[] Data)> _files = new();
     private int _counter;
     private readonly HashSet<string> _secrets = new(StringComparer.Ordinal);
+    private readonly string _prefix;
 
     public void HideSecret(string value)
     {
@@ -46,8 +52,12 @@ public sealed class SiteDebug
         return text;
     }
 
-    public SiteDebug() => Line($"Отладочный отчёт OfficeChat {typeof(SiteDebug).Assembly.GetName().Version}, {DateTime.Now:dd.MM.yyyy HH:mm:ss}, " +
-                               $"{Environment.OSVersion}, .NET {Environment.Version}");
+    public SiteDebug(string site = ForumAutoSite.Id)
+    {
+        _prefix = site == FavoritSite.Id ? "favorit" : "forum";
+        Line($"Отладочный отчёт OfficeChat {typeof(SiteDebug).Assembly.GetName().Version}, {DateTime.Now:dd.MM.yyyy HH:mm:ss}, " +
+             $"{Environment.OSVersion}, .NET {Environment.Version}; сайт {site}");
+    }
 
     public void Line(string text) => _log.Append($"[{DateTime.Now:HH:mm:ss.fff}] ").AppendLine(text);
 
@@ -71,24 +81,49 @@ public sealed class SiteDebug
         return AddFile(name, Encoding.UTF8.GetBytes(Redact(html)));
     }
 
+    public string AddJson(string name, string json)
+    {
+        System.Text.Json.Nodes.JsonNode? node;
+        try { node = System.Text.Json.Nodes.JsonNode.Parse(json); }
+        catch (System.Text.Json.JsonException)
+        {
+            Line("Ответ похож на JSON, но повреждён; сохранён как текст для диагностики");
+            return AddHtml(name + ".txt", json);
+        }
+        void Clean(System.Text.Json.Nodes.JsonNode? value)
+        {
+            if (value is System.Text.Json.Nodes.JsonObject obj)
+                foreach (var key in obj.Select(p => p.Key).ToList())
+                {
+                    if (Regex.IsMatch(key, "password|token|secret|cookie|authorization", RegexOptions.IgnoreCase))
+                        obj[key] = "[скрыто]";
+                    else Clean(obj[key]);
+                }
+            else if (value is System.Text.Json.Nodes.JsonArray array)
+                foreach (var item in array) Clean(item);
+        }
+        Clean(node);
+        return AddFile(name, Encoding.UTF8.GetBytes(Redact(node?.ToJsonString(new() { WriteIndented = true }) ?? "null")));
+    }
+
     /// <summary>Сохранить отчёт: report.txt и приложенные страницы — в zip в папке журналов. Возвращает путь.</summary>
     public string Save(bool automatic = false)
     {
         Directory.CreateDirectory(Log.Folder);
         if (automatic)
         {
-            foreach (var old in new DirectoryInfo(Log.Folder).GetFiles("forum-debug-auto-*.zip")
+            foreach (var old in new DirectoryInfo(Log.Folder).GetFiles($"{_prefix}-debug-auto-*.zip")
                          .OrderByDescending(f => f.CreationTimeUtc).Skip(19))
                 try { old.Delete(); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
-        var path = Path.Combine(Log.Folder, $"forum-debug-{(automatic ? "auto-" : "")}{DateTime.Now:yyyy-MM-dd-HHmmss-fff}-{Guid.NewGuid():N}.zip");
+        var path = Path.Combine(Log.Folder, $"{_prefix}-debug-{(automatic ? "auto-" : "")}{DateTime.Now:yyyy-MM-dd-HHmmss-fff}-{Guid.NewGuid():N}.zip");
         using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
         using (var report = new StreamWriter(zip.CreateEntry("report.txt").Open(), new UTF8Encoding(true)))
             report.Write(Redact(_log.ToString()));
         foreach (var (name, data) in _files)
         {
             using var entry = zip.CreateEntry(name).Open();
-            entry.Write(name.EndsWith(".html", StringComparison.OrdinalIgnoreCase)
+            entry.Write(name.EndsWith(".html", StringComparison.OrdinalIgnoreCase) || name.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
                 ? Encoding.UTF8.GetBytes(Redact(Encoding.UTF8.GetString(data))) : data);
         }
         return path;
@@ -163,6 +198,7 @@ public sealed class ForumAutoSite : ISupplierSite
                         string.Join(", ", cookies.GetAllCookies().Select(c => $"{c.Name} (домен {c.Domain}, {c.Value.Length} символов)")));
 
             var orders = new List<ExternalOrder>();
+            long? balance = null;
             for (var page = 1; page <= MaxArchivePages; page++)
             {
                 var html = await GetAsync(http, page == 1 ? "/shop/archive.html" : $"/shop/archive.html?page={page}", cancel, debug,
@@ -173,6 +209,7 @@ public sealed class ForumAutoSite : ISupplierSite
                     throw new SiteException("Сайт не пустил: проверьте логин и пароль");
                 }
                 var rows = ForumAutoParser.ParseOrders(html, debug);
+                if (page == 1) balance = ForumAutoParser.ParseBalance(html, debug);
                 debug?.Line($"Архив, страница {page}: заказов разобрано {rows.Count}, из них с {since:dd.MM.yyyy} — {rows.Count(o => o.Date >= since)}; " +
                             $"всего страниц по сайту: {ForumAutoParser.PageCount(html)}");
                 if (page == 1 && rows.Count == 0)
@@ -210,7 +247,10 @@ public sealed class ForumAutoSite : ISupplierSite
                 debug?.Line($"  возврат {item.Number} {item.Date:O}: пропущен — раньше даты начала учёта {since:O}");
             debug?.Line($"Возвраты: разобрано {allReturns.Count}, с {since:dd.MM.yyyy} — {returns.Count}, " +
                         $"из них «на баланс» — {returns.Count(r => r.Status.Contains("на баланс", StringComparison.OrdinalIgnoreCase))}");
-            var result = new SiteData(orders.DistinctBy(o => o.Number).ToList(), returns);
+            var result = new SiteData(orders.DistinctBy(o => o.Number).ToList(), returns)
+            {
+                Balance = balance, BalanceSource = "Форум-Авто: к оплате",
+            };
             debug?.Line($"ИТОГ: заказов с {since:dd.MM.yyyy}: {result.Orders.Count}");
             foreach (var order in result.Orders) debug?.Line($"  заказ {order.Number} {order.Date:dd.MM.yyyy HH:mm} «{order.Status}» {order.SumText}");
             foreach (var item in result.Returns) debug?.Line($"  возврат {item.Number} {item.Date:dd.MM.yyyy} «{item.Status}» {Money.Format(item.Sum)}");
@@ -299,6 +339,15 @@ public sealed class ForumAutoSite : ISupplierSite
 /// </summary>
 public static partial class ForumAutoParser
 {
+    public static long? ParseBalance(string html, SiteDebug? debug = null)
+    {
+        var text = WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]+>", " "));
+        var match = Regex.Match(text, @"К\s+оплате\s*:\s*([−-]?\s*\d[\d\s\u00a0]*[.,]\d{2})\s*руб", RegexOptions.IgnoreCase);
+        var due = match.Success ? Money.ParseSigned(match.Groups[1].Value) : null;
+        debug?.Line(due is { } amount ? $"Баланс сайта: к оплате {Money.Format(amount)}; в знаках кассы {Money.Format(-amount)}"
+            : "Баланс сайта: поле «К оплате» не найдено или не разобрано (это не нулевой баланс)");
+        return due is { } value ? -value : null;
+    }
     // Строка таблицы: от <tr …> до </tr>, следующей <tr> или конца таблицы.
     [GeneratedRegex(@"<tr\b[^>]*>(.*?)(?=</tr\s*>|<tr\b|</table\s*>)", RegexOptions.Singleline | RegexOptions.IgnoreCase)]
     private static partial Regex RowRegex();

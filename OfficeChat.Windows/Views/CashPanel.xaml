@@ -27,7 +27,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="🌐 Сайт…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Site_Click"
-                            ToolTip="Брать заказы и возвраты с сайта поставщика (Форум-Авто)" />
+                            ToolTip="Подключить Форум-Авто или Фаворит" />
                     <Button Content="Корректировка…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Correction_Click"
                             ToolTip="Задать баланс поставщика (например, начать учёт с известной суммы)" />
                     <Button Content="Переименовать" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Rename_Click" />
@@ -54,6 +54,17 @@
                 </DockPanel>
                 <TextBlock x:Name="SiteStatusText" FontSize="11" Margin="0,2,0,4" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock x:Name="SiteBalanceText" FontSize="13" TextWrapping="Wrap" Margin="0,3,0,3" />
+                <TextBlock x:Name="LocalBalanceText" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5" />
+                <Expander x:Name="SitePaymentsBox" Margin="0,2,0,6">
+                    <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="SitePaymentsList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Display}" Margin="0,2" /></DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Expander>
                 <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
                     <ItemsControl x:Name="PendingList">
                         <ItemsControl.ItemTemplate>
