@@ -54,7 +54,7 @@ public sealed class SiteDebug
 
     public SiteDebug(string site = ForumAutoSite.Id)
     {
-        _prefix = site == FavoritSite.Id ? "favorit" : "forum";
+        _prefix = site switch { FavoritSite.Id => "favorit", AutorusSite.Id => "autorus", _ => "forum" };
         Line($"Отладочный отчёт OfficeChat {typeof(SiteDebug).Assembly.GetName().Version}, {DateTime.Now:dd.MM.yyyy HH:mm:ss}, " +
              $"{Environment.OSVersion}, .NET {Environment.Version}; сайт {site}");
     }
@@ -95,7 +95,7 @@ public sealed class SiteDebug
             if (value is System.Text.Json.Nodes.JsonObject obj)
                 foreach (var key in obj.Select(p => p.Key).ToList())
                 {
-                    if (Regex.IsMatch(key, "password|token|secret|cookie|authorization", RegexOptions.IgnoreCase))
+                    if (Regex.IsMatch(key, "password|token|secret|cookie|authorization|session", RegexOptions.IgnoreCase))
                         obj[key] = "[скрыто]";
                     else Clean(obj[key]);
                 }

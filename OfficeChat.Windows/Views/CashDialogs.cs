@@ -89,7 +89,8 @@ public static class CashDialogs
         var siteBox = new ComboBox { SelectedIndex = siteId == FavoritSite.Id ? 1 : 0, Padding = pad };
         siteBox.Items.Add(new ComboBoxItem { Content = "Форум-Авто (itrade.forum-auto.ru)", Tag = ForumAutoSite.Id });
         siteBox.Items.Add(new ComboBoxItem { Content = "Фаворит — наличный договор (lk.favorit-parts.ru)", Tag = FavoritSite.Id });
-        siteBox.SelectedIndex = siteId == FavoritSite.Id ? 1 : 0;
+        siteBox.Items.Add(new ComboBoxItem { Content = "Авторусь (autorus.ru)", Tag = AutorusSite.Id });
+        siteBox.SelectedIndex = siteId == AutorusSite.Id ? 2 : siteId == FavoritSite.Id ? 1 : 0;
         string SelectedSite() => (string)((ComboBoxItem)siteBox.SelectedItem).Tag;
         var loginBox = new TextBox { Text = login, MaxLength = 100, Padding = pad };
         var passwordBox = new PasswordBox { MaxLength = 200, Padding = pad };
@@ -144,7 +145,8 @@ public static class CashDialogs
             {
                 Label("Сайт поставщика"), siteBox,
                 Hint("Для каждого сайта создайте отдельного поставщика. Отгрузки ждут ввода оплаты, возвраты пополняют баланс. " +
-                     "У Фаворита учитывается только наличный договор б/н; оплаты сайта показываются для сверки."),
+                     "У Фаворита учитывается только наличный договор б/н; оплаты сайта показываются для сверки. " +
+                     "Авторусь: заказы до десяти подряд полученных; способ оплаты выбирается при записи."),
                 Label("Логин"), loginBox,
                 Label(linked ? "Пароль (оставьте пустым, чтобы не менять)" : "Пароль"), passwordBox,
                 Hint("Пароль хранится в журнале кассы зашифрованным кодом кассы — им пользуются все компьютеры этой кассы."),

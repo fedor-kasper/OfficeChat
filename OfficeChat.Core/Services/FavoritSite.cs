@@ -13,6 +13,7 @@ public static class SupplierSites
     {
         ForumAutoSite.Id => "Форум-Авто",
         FavoritSite.Id => "Фаворит (наличные)",
+        AutorusSite.Id => "Авторусь",
         _ => "Неизвестный сайт",
     };
 
@@ -20,6 +21,7 @@ public static class SupplierSites
     {
         ForumAutoSite.Id => new ForumAutoSite(),
         FavoritSite.Id => new FavoritSite(),
+        AutorusSite.Id => new AutorusSite(),
         _ => throw new SiteException($"Неизвестный сайт поставщика: {id}. Обновите приложение."),
     };
 }

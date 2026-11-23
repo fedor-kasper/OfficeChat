@@ -126,6 +126,7 @@ public partial class CashPanel : UserControl
 
     private void RoundUp_Click(object sender, RoutedEventArgs e)
     {
+        if (PaymentBox.SelectedIndex == 1) return;
         if ((sender as Button)?.Tag is not string tag || !long.TryParse(tag, out var step)) return;
         if (Money.Parse(DueBox.Text) is not { } due) return;
         PaidBox.Text = Money.FormatInput((due + step - 1) / step * step);
@@ -175,7 +176,8 @@ public partial class CashPanel : UserControl
         switch (_kind)
         {
             case CashKind.Delivery:
-                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment);
+                _cash.RecordDelivery(_supplier, Money.Parse(DueBox.Text)!.Value, Money.Parse(PaidBox.Text)!.Value, comment,
+                    paymentMethod: PaymentBox.SelectedIndex == 1 ? CashPaymentMethod.Card : CashPaymentMethod.Cash);
                 break;
             case CashKind.Return:
                 _cash.RecordReturn(_supplier, Money.Parse(AmountBox.Text)!.Value, comment);
@@ -189,7 +191,19 @@ public partial class CashPanel : UserControl
         FocusAmount();
     }
 
-    private void ClearForm() => DueBox.Text = PaidBox.Text = AmountBox.Text = CommentBox.Text = "";
+    private void ClearForm()
+    {
+        DueBox.Text = PaidBox.Text = AmountBox.Text = CommentBox.Text = "";
+        PaymentBox.SelectedIndex = 0;
+    }
+
+    private void Payment_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (RoundingPanel == null || PaymentBox == null) return;
+        RoundingPanel.Visibility = PaymentBox.SelectedIndex == 1 ? Visibility.Collapsed : Visibility.Visible;
+        if (PaymentBox.SelectedIndex == 1 && Money.Parse(DueBox.Text) is { } due)
+            PaidBox.Text = Money.FormatInput(due);
+    }
 
     // ---- Заказы с сайта ----
 
@@ -219,6 +233,13 @@ public partial class CashPanel : UserControl
 
     private void OrderRecord_Click(object sender, RoutedEventArgs e) => RecordOrder(sender);
 
+    private void OrderPayment_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox { SelectedIndex: 1, DataContext: ExternalOrder order } &&
+            OrderInputs(sender).Box is { } box)
+            box.Text = Money.FormatInput(order.Sum);
+    }
+
     /// <summary>Записать оплату заказа с сайта: по накладной — сумма заказа, выдано — что ввели в карточке.</summary>
     private void RecordOrder(object sender)
     {
@@ -228,13 +249,16 @@ public partial class CashPanel : UserControl
         {
             if (preview != null)
             {
-                preview.Text = "введите, сколько отдали водителю";
+                preview.Text = "введите точную сумму оплаты";
                 preview.Foreground = Red;
             }
             box.Focus();
             return;
         }
-        _cash.RecordDelivery(_supplier, order.Sum, paid, $"Заказ №{order.Number} от {order.DateText}", order.External);
+        var method = (sender as FrameworkElement)?.Parent is Panel row &&
+                     row.Children.OfType<ComboBox>().FirstOrDefault()?.SelectedIndex == 1
+            ? CashPaymentMethod.Card : CashPaymentMethod.Cash;
+        _cash.RecordDelivery(_supplier, order.Sum, paid, $"Заказ №{order.Number} от {order.DateText}", order.External, method);
         Refresh();
     }
 

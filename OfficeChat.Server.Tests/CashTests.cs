@@ -79,6 +79,21 @@ public class CashTests : IDisposable
     }
 
     [Fact]
+    public void Cash_and_card_methods_sync_with_exact_amounts()
+    {
+        var first = Create("Первый");
+        var second = Create("Второй");
+        var supplier = first.AddSupplier("Авторусь");
+        first.RecordDelivery(supplier, 17202, 17202, "", "autorus:order:1", CashPaymentMethod.Card);
+        first.RecordDelivery(supplier, 17202, 20000, "", "autorus:order:2", CashPaymentMethod.Cash);
+        Sync();
+        var received = Assert.Single(second.Suppliers);
+        Assert.Equal(2798, received.Balance);
+        Assert.Equal(CashPaymentMethod.Card, received.Entries.Single(e => e.Operation.External.EndsWith(":1")).Operation.PaymentMethod);
+        Assert.Equal(CashPaymentMethod.Cash, received.Entries.Single(e => e.Operation.External.EndsWith(":2")).Operation.PaymentMethod);
+    }
+
+    [Fact]
     public void Journal_survives_restart()
     {
         var cash = Create("Касса");

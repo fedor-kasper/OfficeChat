@@ -198,10 +198,10 @@ public sealed class CashService : IDisposable
 
     /// <summary>Поставка: по накладной <paramref name="due"/>, выдали <paramref name="paid"/> (копейки).
     /// <paramref name="external"/> — заказ с сайта поставщика, если оплачиваем его.</summary>
-    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment, string external = "") =>
+    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment, string external = "", CashPaymentMethod paymentMethod = CashPaymentMethod.Unspecified) =>
         Record(new CashOperation
         {
-            Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500), External = external,
+            Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500), External = external, PaymentMethod = paymentMethod,
         });
 
     public CashOperation RecordReturn(Supplier supplier, long amount, string comment, string external = "") =>
@@ -789,7 +789,7 @@ public sealed class CashService : IDisposable
 
     private static bool IsValid(CashOperation op) =>
         op.Id != Guid.Empty && op.DeviceId != Guid.Empty && op.Seq > 0 && op.SupplierId != Guid.Empty &&
-        Enum.IsDefined(op.Kind) && op.Due is >= 0 and <= Money.MaxAmount && op.Paid is >= 0 and <= Money.MaxAmount &&
+        Enum.IsDefined(op.Kind) && Enum.IsDefined(op.PaymentMethod) && op.Due is >= 0 and <= Money.MaxAmount && op.Paid is >= 0 and <= Money.MaxAmount &&
         op.Amount is >= 0 and <= Money.MaxAmount && op.Name.Length <= 100 && op.Comment.Length <= 500 &&
         op.Author.Length <= 100 && op.Machine.Length <= 100 && (op.Kind != CashKind.Cancel || op.TargetId != Guid.Empty) &&
         op.Balance is >= -Money.MaxAmount and <= Money.MaxAmount && op.External.Length <= 100 && op.Login.Length <= 100 &&

@@ -5,6 +5,8 @@ using System.Text.Json.Serialization;
 
 namespace OfficeChat.Models;
 
+public enum CashPaymentMethod { Unspecified = 0, Cash = 1, Card = 2 }
+
 /// <summary>Вид записи в журнале кассы.</summary>
 public enum CashKind
 {
@@ -46,6 +48,13 @@ public sealed record CashOperation
     [JsonPropertyName("name")] public string Name { get; init; } = "";
     [JsonPropertyName("due")] public long Due { get; init; }
     [JsonPropertyName("paid")] public long Paid { get; init; }
+    [JsonPropertyName("paymentMethod")] public CashPaymentMethod PaymentMethod { get; init; }
+    [JsonIgnore] public string PaymentMethodText => PaymentMethod switch
+    {
+        CashPaymentMethod.Cash => "наличные",
+        CashPaymentMethod.Card => "карта",
+        _ => "способ оплаты не указан",
+    };
     [JsonPropertyName("amount")] public long Amount { get; init; }
     [JsonPropertyName("comment")] public string Comment { get; init; } = "";
     [JsonPropertyName("target")] public Guid TargetId { get; init; }
@@ -267,7 +276,7 @@ public sealed class CashEntry
     /// <summary>«по накладной 672,34 ₽, выдано 700,00 ₽».</summary>
     public string Details => Operation.Kind switch
     {
-        CashKind.Delivery => $"по накладной {Money.Format(Operation.Due)}, выдано {Money.Format(Operation.Paid)}",
+        CashKind.Delivery => $"по накладной {Money.Format(Operation.Due)}, оплачено {Money.Format(Operation.Paid)} · {Operation.PaymentMethodText}",
         CashKind.Return => $"на сумму {Money.Format(Operation.Amount)}",
         CashKind.Payout => $"{Money.Format(Operation.Amount)} — вернули деньгами или учли в накладной",
         CashKind.BalanceSet => $"баланс стал {Money.Format(Operation.Balance)}",
