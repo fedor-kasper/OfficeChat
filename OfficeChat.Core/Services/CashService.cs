@@ -55,11 +55,15 @@ public sealed class CashService : IDisposable
     private ICashTransport? _transport;
     private UiTimer? _timer;
     private byte[]? _key;
-    private readonly ISupplierSite _site;
+    private readonly ISupplierSite? _site;
     // Заказы, взятые с сайта, по поставщикам (в журнал попадают, только когда кассир записал оплату).
     private readonly Dictionary<Guid, List<ExternalOrder>> _siteOrders = new();
     private UiTimer? _siteTimer;
     private bool _refreshingSites;
+    private bool _refreshAgain;
+    private bool _disposed;
+    private CancellationTokenSource _siteStop = new();
+    private readonly SemaphoreSlim _siteRefreshGate = new(1, 1);
 
     /// <summary>Поставщики по алфавиту (убранные из списка не показываются).</summary>
     public ObservableCollection<Supplier> Suppliers { get; } = new();
@@ -86,7 +90,7 @@ public sealed class CashService : IDisposable
         SynchronizationContext? context = null, ISupplierSite? site = null)
     {
         _settings = settings;
-        _site = site ?? new ForumAutoSite();
+        _site = site;
         _store = new CashStore(databasePath);
         _ui = context ?? SynchronizationContext.Current ?? new SynchronizationContext();
         _createTransport = transport ?? (() => new UdpCashTransport());
@@ -97,14 +101,16 @@ public sealed class CashService : IDisposable
     /// <summary>Включить синхронизацию по коду кассы из настроек (без кода — касса только на этом компьютере).</summary>
     public void Start()
     {
+        if (_disposed) return;
         Stop();
+        _siteStop = new CancellationTokenSource();
         if (AutoSync)
         {
-            // Сайты поставщиков: первый раз — чуть погодя (сначала синхронизируемся с остальными кассами), дальше — регулярно.
+            // Первый запрос сразу при запуске, дальше — каждые десять минут.
             _siteTimer = new UiTimer { Interval = SiteInterval };
             _siteTimer.Tick += async (_, _) => await RefreshSitesAsync();
             _siteTimer.Start();
-            _ = Task.Delay(TimeSpan.FromSeconds(20)).ContinueWith(_ => _ui.Post(async _ => await RefreshSitesAsync(), null));
+            _ = RefreshSitesAsync();
         }
         if (string.IsNullOrWhiteSpace(_settings.CashCode)) return;
         _key = DeriveKey(_settings.CashCode);
@@ -133,6 +139,8 @@ public sealed class CashService : IDisposable
 
     public void Stop()
     {
+        _siteStop.Cancel();
+        _refreshAgain = false;
         _timer?.Dispose();
         _timer = null;
         _siteTimer?.Dispose();
@@ -190,10 +198,10 @@ public sealed class CashService : IDisposable
 
     /// <summary>Поставка: по накладной <paramref name="due"/>, выдали <paramref name="paid"/> (копейки).
     /// <paramref name="external"/> — заказ с сайта поставщика, если оплачиваем его.</summary>
-    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment, string external = "") =>
+    public CashOperation RecordDelivery(Supplier supplier, long due, long paid, string comment, string external = "", CashPaymentMethod paymentMethod = CashPaymentMethod.Unspecified) =>
         Record(new CashOperation
         {
-            Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500), External = external,
+            Kind = CashKind.Delivery, SupplierId = supplier.Id, Due = due, Paid = paid, Comment = Clean(comment, 500), External = external, PaymentMethod = paymentMethod,
         });
 
     public CashOperation RecordReturn(Supplier supplier, long amount, string comment, string external = "") =>
@@ -218,14 +226,18 @@ public sealed class CashService : IDisposable
     /// Подключить поставщика к сайту: логин, пароль (хранится зашифрованным кодом кассы, уходит на все компьютеры кассы)
     /// и с какой даты учитывать заказы и возвраты. Пустой логин — отключить.
     /// </summary>
-    public void Link(Supplier supplier, string login, string password, DateTime since)
+    public void Link(Supplier supplier, string login, string password, DateTime since, string siteId = ForumAutoSite.Id)
     {
+        if (login.Length > 0) _ = SupplierSites.Create(siteId); // неизвестный сайт не сохраняем
         Record(new CashOperation
         {
-            Kind = CashKind.SupplierLinked, SupplierId = supplier.Id, Name = login.Length > 0 ? ForumAutoSite.Id : "",
-            Login = Clean(login, 100), Secret = login.Length > 0 ? ProtectSecret(password) : "", Since = new DateTimeOffset(since.Date),
+            Kind = CashKind.SupplierLinked, SupplierId = supplier.Id, Name = login.Length > 0 ? siteId : "",
+            Login = Clean(login, 100), Secret = login.Length > 0 ? ProtectSecret(password) : "", Since = new DateTimeOffset(since),
         });
         _siteOrders.Remove(supplier.Id);
+        supplier.SiteBalance = null;
+        supplier.SiteBalanceUpdatedAt = null;
+        supplier.SitePayments.Clear();
         supplier.SiteStatus = login.Length > 0 ? "Подключено — загружаем заказы…" : "";
         Rebuild();
         Changed?.Invoke();
@@ -298,6 +310,7 @@ public sealed class CashService : IDisposable
     /// <summary>Пересчитать поставщиков и балансы по всему журналу (записей немного — это быстро).</summary>
     private void Rebuild()
     {
+        var previousLinks = _suppliers.ToDictionary(p => p.Key, p => p.Value.Link);
         var ordered = _ops.OrderBy(o => o.CreatedAt).ThenBy(o => o.DeviceId).ThenBy(o => o.Seq).ToList();
         var cancels = new Dictionary<Guid, CashOperation>();
         foreach (var op in ordered.Where(o => o.Kind == CashKind.Cancel)) cancels.TryAdd(op.TargetId, op);
@@ -339,6 +352,13 @@ public sealed class CashService : IDisposable
 
         foreach (var supplier in _suppliers.Values)
         {
+            if (previousLinks.GetValueOrDefault(supplier.Id) != supplier.Link)
+            {
+                _siteOrders.Remove(supplier.Id);
+                supplier.SiteBalance = null;
+                supplier.SiteBalanceUpdatedAt = null;
+                supplier.SitePayments = new();
+            }
             long balance = 0;
             foreach (var entry in supplier.Entries)
             {
@@ -382,7 +402,7 @@ public sealed class CashService : IDisposable
             .Where(e => e.Counts && e.Operation.Kind == CashKind.Delivery && e.Operation.External.Length == 0)
             .Select(e => e.Operation).ToList();
         var pending = new List<ExternalOrder>();
-        foreach (var order in orders.Where(o => o.Date >= since.Date && o.Sum > 0 && !IsCancelledStatus(o.Status) &&
+        foreach (var order in orders.Where(o => o.Date >= since.LocalDateTime && o.Sum > 0 && !IsCancelledStatus(o.Status) &&
                                                 !supplier.Recorded.Contains(o.External)).OrderBy(o => o.Date))
         {
             var paid = manual.FirstOrDefault(m => m.Due == order.Sum && m.CreatedAt.LocalDateTime >= order.Date.AddHours(-1));
@@ -403,12 +423,37 @@ public sealed class CashService : IDisposable
     /// </summary>
     public async Task RefreshSitesAsync()
     {
-        if (_refreshingSites || !_settings.CashMode) return;
+        if (_disposed || _siteStop.IsCancellationRequested) return;
+        if (_refreshingSites || !_settings.CashMode)
+        {
+            if (_refreshingSites && _settings.CashMode) _refreshAgain = true;
+            Log.Info($"Касса: обновление сайтов пропущено — {(_refreshingSites ? "уже выполняется" : "режим кассы выключен")}");
+            return;
+        }
         _refreshingSites = true;
         try
         {
-            foreach (var supplier in _suppliers.Values.Where(s => s.Link != null && Suppliers.Contains(s)).ToList())
-                await RefreshSupplierAsync(supplier, null);
+            do
+            {
+                _refreshAgain = false;
+                foreach (var supplier in _suppliers.Values.Where(s => s.Link != null && Suppliers.Contains(s)).ToList())
+                {
+                    if (_disposed || _siteStop.IsCancellationRequested) break;
+                    var debug = new SiteDebug(supplier.Link!.Name);
+                    debug.Line($"Автоматический отчёт: поставщик «{supplier.Name}», {supplier.Id}; учёт с {supplier.Link?.Since:O}");
+                    try
+                    {
+                        await RefreshSupplierAsync(supplier, debug);
+                        DescribePending(supplier, debug);
+                    }
+                    finally
+                    {
+                        debug.Line($"Состояние: {supplier.SiteStatus}; карточек в модели: {supplier.PendingOrders.Count}");
+                        try { Log.Info($"Касса: диагностика сайта: {debug.Save(automatic: true)}"); }
+                        catch (Exception ex) { Log.Warn("Касса: не удалось сохранить диагностику сайта", ex); }
+                    }
+                }
+            } while (_refreshAgain && !_disposed && !_siteStop.IsCancellationRequested);
         }
         finally
         {
@@ -422,7 +467,7 @@ public sealed class CashService : IDisposable
     /// </summary>
     public async Task<string> DebugSiteAsync(Supplier supplier)
     {
-        var debug = new SiteDebug();
+        var debug = new SiteDebug(supplier.Link?.Name ?? ForumAutoSite.Id);
         debug.Line($"Касса: компьютер {Environment.MachineName}, код кассы {(_settings.CashCode.Length > 0 ? "задан" : "не задан")}, " +
                    $"записей в журнале {_ops.Count}, поставщик «{supplier.Name}», баланс {Money.Format(supplier.Balance)}");
         if (supplier.Link is not { } link)
@@ -444,7 +489,27 @@ public sealed class CashService : IDisposable
 
     private async Task RefreshSupplierAsync(Supplier supplier, SiteDebug? debug)
     {
+        debug?.Line("Ожидание очереди загрузки сайта");
+        if (_disposed || _siteStop.IsCancellationRequested) return;
+        var cancel = _siteStop.Token;
+        try { await _siteRefreshGate.WaitAsync(cancel); }
+        catch (OperationCanceledException) { debug?.Line("Загрузка отменена при остановке кассы"); return; }
+        try
+        {
+            if (supplier.Link == null)
+            {
+                debug?.Line("Загрузка пропущена: поставщик отключён от сайта");
+                return;
+            }
+            await RefreshSupplierCoreAsync(supplier, debug, cancel);
+        }
+        finally { _siteRefreshGate.Release(); }
+    }
+
+    private async Task RefreshSupplierCoreAsync(Supplier supplier, SiteDebug? debug, CancellationToken cancel)
+    {
         var link = supplier.Link!;
+        supplier.SiteBalanceStale = true;
         if (UnprotectSecret(link.Secret) is not { } password)
         {
             supplier.SiteStatus = "Не удалось расшифровать пароль сайта (сменили код кассы?) — подключите сайт заново";
@@ -454,10 +519,20 @@ public sealed class CashService : IDisposable
         }
         try
         {
-            var data = await _site.FetchAsync(link.Login, password, link.Since?.Date ?? DateTime.Today, CancellationToken.None, debug);
-            if (supplier.Link != link) return; // пока ходили — переподключили
+            var data = await (_site ?? SupplierSites.Create(link.Name)).FetchAsync(link.Login, password, link.Since?.LocalDateTime ?? DateTime.Today, cancel, debug);
+            if (_disposed || cancel.IsCancellationRequested || supplier.Link != link)
+            {
+                debug?.Line("Ответ не применён: подключение поставщика изменилось во время загрузки");
+                return;
+            }
             _siteOrders[supplier.Id] = data.Orders;
-            var added = ApplyReturns(supplier, data.Returns);
+            supplier.SiteBalance = data.Balance;
+            supplier.SiteBalanceUpdatedAt = DateTime.Now;
+            supplier.SiteBalanceSource = data.BalanceSource;
+            supplier.SiteBalanceStale = false;
+            supplier.SitePayments = data.Payments;
+            debug?.Line($"Сверка: сайт={(data.Balance is { } b ? Money.Format(b) : "не получен")}; приложение={Money.Format(supplier.Balance)}");
+            var added = ApplyReturns(supplier, data.Returns, debug);
             Rebuild();
             var since = link.Since?.Date ?? DateTime.Today;
             supplier.SiteStatus = $"Сайт: обновлено в {DateTime.Now:HH:mm} — заказов с {since:dd.MM}: {data.Orders.Count}, " +
@@ -465,8 +540,14 @@ public sealed class CashService : IDisposable
                                   (added > 0 ? $" (новых: {added})" : "");
             Log.Info($"Касса: сайт {link.Login} — заказов {data.Orders.Count}, возвратов {data.Returns.Count}, новых возвратов {added}");
         }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        {
+            debug?.Line("Загрузка отменена при остановке кассы");
+            return;
+        }
         catch (SiteException ex)
         {
+            debug?.Line($"ОШИБКА сайта: {ex}");
             supplier.SiteStatus = $"Сайт ({DateTime.Now:HH:mm}): {ex.Message}";
             Log.Warn($"Касса: сайт {link.Login}: {ex.Message}", ex.InnerException);
         }
@@ -488,7 +569,7 @@ public sealed class CashService : IDisposable
             debug.Line("Заказы с сайта не получены");
             return;
         }
-        var since = supplier.Link?.Since?.Date ?? DateTime.Today;
+        var since = supplier.Link?.Since?.LocalDateTime ?? DateTime.Today;
         debug.Line($"Заказов получено: {orders.Count}, ждут оплаты: {supplier.PendingOrders.Count}");
         foreach (var order in orders.OrderBy(o => o.Date))
         {
@@ -503,13 +584,18 @@ public sealed class CashService : IDisposable
     }
 
     /// <summary>Возвраты «Поставлен на баланс», которых ещё нет в журнале, — записать. Возвращает, сколько записали.</summary>
-    private int ApplyReturns(Supplier supplier, List<ExternalReturn> returns)
+    private int ApplyReturns(Supplier supplier, List<ExternalReturn> returns, SiteDebug? debug = null)
     {
-        var since = supplier.Link?.Since?.Date ?? DateTime.Today;
+        var since = supplier.Link?.Since?.LocalDateTime ?? DateTime.Today;
         var added = 0;
-        foreach (var item in returns.Where(r => IsCreditedReturn(r) && r.Date >= since && r.Sum > 0 && !supplier.Recorded.Contains(r.External))
-                     .OrderBy(r => r.Date))
+        foreach (var item in returns.OrderBy(r => r.Date))
         {
+            var why = !IsCreditedReturn(item) ? "статус не «на баланс»"
+                : item.Date < since ? "раньше даты начала учёта"
+                : item.Sum <= 0 ? "сумма не положительная"
+                : supplier.Recorded.Contains(item.External) ? "уже записан в журнале" : null;
+            debug?.Line($"Возврат {item.Number}, {item.Date:dd.MM.yyyy}, «{item.Status}», {Money.Format(item.Sum)}: {why ?? "записываем на баланс"}");
+            if (why != null) continue;
             var penalty = item.Penalty is "" or "0" ? "" : $", штраф {item.Penalty}";
             RecordReturn(supplier, item.Sum, $"Возврат №{item.Number} от {item.Date:dd.MM.yyyy} ({item.Reason}{penalty}) — с сайта", item.External);
             added++;
@@ -703,7 +789,7 @@ public sealed class CashService : IDisposable
 
     private static bool IsValid(CashOperation op) =>
         op.Id != Guid.Empty && op.DeviceId != Guid.Empty && op.Seq > 0 && op.SupplierId != Guid.Empty &&
-        Enum.IsDefined(op.Kind) && op.Due is >= 0 and <= Money.MaxAmount && op.Paid is >= 0 and <= Money.MaxAmount &&
+        Enum.IsDefined(op.Kind) && Enum.IsDefined(op.PaymentMethod) && op.Due is >= 0 and <= Money.MaxAmount && op.Paid is >= 0 and <= Money.MaxAmount &&
         op.Amount is >= 0 and <= Money.MaxAmount && op.Name.Length <= 100 && op.Comment.Length <= 500 &&
         op.Author.Length <= 100 && op.Machine.Length <= 100 && (op.Kind != CashKind.Cancel || op.TargetId != Guid.Empty) &&
         op.Balance is >= -Money.MaxAmount and <= Money.MaxAmount && op.External.Length <= 100 && op.Login.Length <= 100 &&
@@ -748,6 +834,8 @@ public sealed class CashService : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         Stop();
         _store.Dispose();
     }

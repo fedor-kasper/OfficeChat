@@ -27,7 +27,7 @@
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                     <Button Content="🌐 Сайт…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Site_Click"
-                            ToolTip="Брать заказы и возвраты с сайта поставщика (Форум-Авто)" />
+                            ToolTip="Подключить Форум-Авто, Фаворит или Авторусь" />
                     <Button Content="Корректировка…" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Correction_Click"
                             ToolTip="Задать баланс поставщика (например, начать учёт с известной суммы)" />
                     <Button Content="Переименовать" Padding="8,3" FontSize="12" Margin="0,0,6,0" Click="Rename_Click" />
@@ -54,6 +54,17 @@
                 </DockPanel>
                 <TextBlock x:Name="SiteStatusText" FontSize="11" Margin="0,2,0,4" TextWrapping="Wrap"
                            Foreground="{StaticResource MutedTextBrush}" />
+                <TextBlock x:Name="SiteBalanceText" FontSize="13" TextWrapping="Wrap" Margin="0,3,0,3" />
+                <TextBlock x:Name="LocalBalanceText" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,5" />
+                <Expander x:Name="SitePaymentsBox" Margin="0,2,0,6">
+                    <ScrollViewer MaxHeight="140" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl x:Name="SitePaymentsList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate><TextBlock Text="{Binding Display}" Margin="0,2" /></DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Expander>
                 <ScrollViewer MaxHeight="320" VerticalScrollBarVisibility="Auto">
                     <ItemsControl x:Name="PendingList">
                         <ItemsControl.ItemTemplate>
@@ -73,15 +84,19 @@
                                                 <TextBlock Text="{Binding Status}" FontSize="12" Foreground="#7F1D1D" VerticalAlignment="Center" />
                                             </StackPanel>
                                         </DockPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                            <TextBlock Text="Выдано водителю, ₽:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                        <WrapPanel Margin="0,6,0,0">
+                                            <ComboBox SelectedIndex="0" Width="110" Margin="0,0,8,0" SelectionChanged="OrderPayment_Changed">
+                                                <ComboBoxItem Content="Наличные" />
+                                                <ComboBoxItem Content="Карта" />
+                                            </ComboBox>
+                                            <TextBlock Text="Оплачено, ₽:" FontSize="13" VerticalAlignment="Center" Margin="0,0,8,0" />
                                             <TextBox Width="130" FontSize="15" Padding="4,2" Tag="paid" Margin="0,0,8,0"
                                                      TextChanged="OrderPaid_TextChanged" KeyDown="OrderPaid_KeyDown" />
                                             <Button Content="Записать" Padding="14,4" FontSize="13" Margin="0,0,8,0"
                                                     Style="{StaticResource FlatButton}" Background="#DC2626" Click="OrderRecord_Click" />
                                             <Button Content="Не оплачиваем…" Padding="8,3" FontSize="11" Margin="0,0,8,0" Click="SkipOrder_Click" />
                                             <TextBlock Tag="preview" FontSize="12" VerticalAlignment="Center" />
-                                        </StackPanel>
+                                        </WrapPanel>
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>
@@ -115,10 +130,17 @@
                         <TextBox x:Name="DueBox" Style="{StaticResource Amount}" />
                     </StackPanel>
                     <StackPanel Margin="0,0,14,0" Width="170">
-                        <TextBlock Style="{StaticResource Label}" Text="Выдано водителю, ₽" />
+                        <TextBlock Style="{StaticResource Label}" Text="Оплачено, ₽ (точная сумма)" />
                         <TextBox x:Name="PaidBox" Style="{StaticResource Amount}" />
                     </StackPanel>
-                    <StackPanel VerticalAlignment="Bottom" Orientation="Horizontal" Margin="0,0,0,3">
+                    <StackPanel Width="120" Margin="0,0,14,0">
+                        <TextBlock Style="{StaticResource Label}" Text="Способ оплаты" />
+                        <ComboBox x:Name="PaymentBox" SelectedIndex="0" Padding="4,3" SelectionChanged="Payment_Changed">
+                            <ComboBoxItem Content="Наличные" />
+                            <ComboBoxItem Content="Карта" />
+                        </ComboBox>
+                    </StackPanel>
+                    <StackPanel x:Name="RoundingPanel" VerticalAlignment="Bottom" Orientation="Horizontal" Margin="0,0,0,3">
                         <TextBlock Text="Округлить:" FontSize="12" VerticalAlignment="Center" Margin="0,0,4,0"
                                    Foreground="{StaticResource MutedTextBrush}" />
                         <Button Content="до 10" Padding="6,2" FontSize="12" Margin="0,0,4,0" Tag="1000" Click="RoundUp_Click" />

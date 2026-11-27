@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using OfficeChat.Services;
 
 namespace OfficeChat.Views;
 
@@ -75,29 +76,50 @@ public static class CashDialogs
     }
 
     /// <summary>Что ввели в окне «Сайт поставщика». Пустой логин — отключить сайт.</summary>
-    public sealed record SiteLinkResult(string Login, string Password, DateTime Since, long? StartBalance);
+    public sealed record SiteLinkResult(string Login, string Password, DateTime Since, long? StartBalance, string SiteId = ForumAutoSite.Id);
 
     /// <summary>Подключить поставщика к сайту (Форум-Авто): логин, пароль, с какой даты учитывать, начальный баланс.</summary>
-    public static SiteLinkResult? SiteLink(Window? owner, string login, bool linked, DateTime since)
+    public static SiteLinkResult? SiteLink(Window? owner, string login, bool linked, DateTime since, string siteId = ForumAutoSite.Id)
     {
         SiteLinkResult? result = null;
         var window = NewWindow(owner, "Сайт поставщика", 460);
         TextBlock Label(string text) => new() { Text = text, FontSize = 12, Margin = new Thickness(0, 10, 0, 3) };
         TextBlock Hint(string text) => new() { Text = text, TextWrapping = TextWrapping.Wrap, FontSize = 11, Foreground = Muted };
         Thickness pad = new(4, 3, 4, 3);
+        var siteBox = new ComboBox { SelectedIndex = siteId == FavoritSite.Id ? 1 : 0, Padding = pad };
+        siteBox.Items.Add(new ComboBoxItem { Content = "Форум-Авто (itrade.forum-auto.ru)", Tag = ForumAutoSite.Id });
+        siteBox.Items.Add(new ComboBoxItem { Content = "Фаворит — наличный договор (lk.favorit-parts.ru)", Tag = FavoritSite.Id });
+        siteBox.Items.Add(new ComboBoxItem { Content = "Авторусь (autorus.ru)", Tag = AutorusSite.Id });
+        siteBox.SelectedIndex = siteId == AutorusSite.Id ? 2 : siteId == FavoritSite.Id ? 1 : 0;
+        string SelectedSite() => (string)((ComboBoxItem)siteBox.SelectedItem).Tag;
         var loginBox = new TextBox { Text = login, MaxLength = 100, Padding = pad };
+        var loginLabel = Label(siteId == AutorusSite.Id ? "Телефон или почта Авторуси" : "Логин");
+        siteBox.SelectionChanged += (_, _) => loginLabel.Text = SelectedSite() == AutorusSite.Id ? "Телефон или почта Авторуси" : "Логин";
         var passwordBox = new PasswordBox { MaxLength = 200, Padding = pad };
         var sinceBox = new TextBox { Text = since.ToString("dd.MM.yyyy"), Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
         var balanceBox = new TextBox { Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
+        var isDebt = new CheckBox { Content = "Это наш долг поставщику", IsChecked = true, Margin = new Thickness(0, 4, 0, 4) };
+        var currentBalance = new CheckBox
+        {
+            Content = new TextBlock { Text = "Сумма на сейчас — учитывать только новые документы", TextWrapping = TextWrapping.Wrap, Width = 370 }, IsChecked = true,
+            Margin = new Thickness(0, 4, 0, 4),
+            Visibility = siteId == FavoritSite.Id ? Visibility.Visible : Visibility.Collapsed,
+        };
+        siteBox.SelectionChanged += (_, _) => currentBalance.Visibility = SelectedSite() == FavoritSite.Id ? Visibility.Visible : Visibility.Collapsed;
         var error = new TextBlock { Foreground = Brushes.Firebrick, TextWrapping = TextWrapping.Wrap, Visibility = Visibility.Collapsed };
         // «Сохранить» закрывает окно, только если всё введено верно.
         var (buttons, _) = Buttons("Сохранить", window, () =>
         {
             var name = loginBox.Text.Trim();
+            if (SelectedSite() == AutorusSite.Id)
+            {
+                try { name = AutorusSite.NormalizeLogin(name); }
+                catch (SiteException ex) { error.Text = ex.Message; error.Visibility = Visibility.Visible; return false; }
+            }
             long? balance = null;
             error.Visibility = Visibility.Visible;
             if (name.Length == 0) error.Text = "Введите логин";
-            else if (!linked && passwordBox.Password.Length == 0) error.Text = "Введите пароль";
+            else if ((!linked || SelectedSite() != siteId) && passwordBox.Password.Length == 0) error.Text = "Введите пароль выбранного сайта";
             else if (!DateTime.TryParseExact(sinceBox.Text.Trim(), "dd.MM.yyyy", System.Globalization.CultureInfo.InvariantCulture,
                          System.Globalization.DateTimeStyles.None, out var date))
                 error.Text = "Дата — в виде 20.11.2026";
@@ -105,7 +127,9 @@ public static class CashDialogs
                 error.Text = "Начальный баланс — число, например 1500 или -250,50";
             else
             {
-                result = new SiteLinkResult(name, passwordBox.Password, date, balance);
+                if (balance.HasValue && isDebt.IsChecked == true) balance = -Math.Abs(balance.Value);
+                if (balance.HasValue && SelectedSite() == FavoritSite.Id && currentBalance.IsChecked == true) date = DateTime.Now;
+                result = new SiteLinkResult(name, passwordBox.Password, date, balance, SelectedSite());
                 return true;
             }
             return false;
@@ -126,15 +150,18 @@ public static class CashDialogs
             Margin = new Thickness(20),
             Children =
             {
-                new TextBlock { Text = "Форум-Авто (itrade.forum-auto.ru)", FontSize = 15, FontWeight = FontWeights.SemiBold },
-                Hint("Касса сама будет заходить в личный кабинет: заказы из архива появятся в списке «ждут оплаты» " +
-                     "(остаётся ввести, сколько отдали), а возвраты «Поставлен на баланс» сразу прибавятся к балансу."),
-                Label("Логин"), loginBox,
+                Label("Сайт поставщика"), siteBox,
+                Hint("Для каждого сайта создайте отдельного поставщика. Отгрузки ждут ввода оплаты, возвраты пополняют баланс. " +
+                     "У Фаворита учитывается только наличный договор б/н; оплаты сайта показываются для сверки. " +
+                     "Авторусь: заказы до десяти подряд полученных; способ оплаты выбирается при записи."),
+                loginLabel, loginBox,
+                Hint("Авторусь: можно ввести телефон с +7, скобками и пробелами или почту. Ниже — пароль от сайта, не код из СМС."),
                 Label(linked ? "Пароль (оставьте пустым, чтобы не менять)" : "Пароль"), passwordBox,
                 Hint("Пароль хранится в журнале кассы зашифрованным кодом кассы — им пользуются все компьютеры этой кассы."),
                 Label("Учитывать заказы и возвраты с даты"), sinceBox,
-                Label("Баланс поставщика на эту дату (необязательно)"), balanceBox,
-                Hint("Чтобы начать учёт с известной суммы: баланс станет таким, дальше пойдут заказы и возвраты с сайта."),
+                Label("Начальный баланс, ₽ (необязательно)"), balanceBox, isDebt, currentBalance,
+                Hint("Укажите долг положительным числом с галочкой выше. Без галочки плюс означает, что поставщик должен нам. " +
+                     "Если сумма не на сейчас — укажите баланс на начало выбранной даты. Возвраты начиная с неё прибавятся к балансу."),
                 error,
                 buttons,
             },

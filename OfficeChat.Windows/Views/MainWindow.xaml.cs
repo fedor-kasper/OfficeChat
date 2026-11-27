@@ -138,6 +138,18 @@ public partial class MainWindow : Window
         {
             if (_current != null) _chat.MarkRead(_current);
         };
+        // Не каждый переход фокуса: только показ из трея и восстановление свёрнутого окна.
+        var wasMinimized = WindowState == WindowState.Minimized;
+        StateChanged += (_, _) =>
+        {
+            var minimized = WindowState == WindowState.Minimized;
+            if (wasMinimized && !minimized && IsVisible) _ = _cash.RefreshSitesAsync();
+            wasMinimized = minimized;
+        };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible && WindowState != WindowState.Minimized) _ = _cash.RefreshSitesAsync();
+        };
 
         OnPresenceChanged();
     }

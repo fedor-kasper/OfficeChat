@@ -79,6 +79,21 @@ public class CashTests : IDisposable
     }
 
     [Fact]
+    public void Cash_and_card_methods_sync_with_exact_amounts()
+    {
+        var first = Create("Первый");
+        var second = Create("Второй");
+        var supplier = first.AddSupplier("Авторусь");
+        first.RecordDelivery(supplier, 17202, 17202, "", "autorus:order:1", CashPaymentMethod.Card);
+        first.RecordDelivery(supplier, 17202, 20000, "", "autorus:order:2", CashPaymentMethod.Cash);
+        Sync();
+        var received = Assert.Single(second.Suppliers);
+        Assert.Equal(2798, received.Balance);
+        Assert.Equal(CashPaymentMethod.Card, received.Entries.Single(e => e.Operation.External.EndsWith(":1")).Operation.PaymentMethod);
+        Assert.Equal(CashPaymentMethod.Cash, received.Entries.Single(e => e.Operation.External.EndsWith(":2")).Operation.PaymentMethod);
+    }
+
+    [Fact]
     public void Journal_survives_restart()
     {
         var cash = Create("Касса");
@@ -318,6 +333,62 @@ public class CashTests : IDisposable
     }
 
     // ---- Сеть в памяти ----
+
+    [Fact]
+    public void Site_report_preserves_parse_errors_and_hides_credentials()
+    {
+        var debug = new SiteDebug();
+        debug.HideSecret("test-password-123");
+        debug.Line("error: test-password-123");
+        debug.AddHtml("response.html", """
+            <meta charset="windows-1251"><input value='csrf-secret-456' name='csrf_token'>
+            <input name="password" value="test-password-123"><p>Архив заказов</p>
+            """);
+        ForumAutoParser.ParseOrders("""
+            <table><tr><td><a href="paid_view.html?paid=1">12345</a></td>
+            <td>21.11.2026</td><td>Выдан</td><td>не число</td></tr></table>
+            """, debug);
+        var path = debug.Save();
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(path);
+            var contents = zip.Entries.Select(e =>
+            {
+                using var reader = new StreamReader(e.Open());
+                return reader.ReadToEnd();
+            }).ToArray();
+            var text = string.Join("\n", contents);
+            Assert.DoesNotContain("test-password-123", text);
+            Assert.DoesNotContain("csrf-secret-456", text);
+            Assert.Contains("Архив заказов", text);
+            Assert.Contains("не читается", text);
+            Assert.Contains("charset=\"utf-8\"", text);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Site_report_explains_rejected_returns_and_pending_orders()
+    {
+        var site = new FakeSite();
+        site.Orders.Add(new ExternalOrder("123", DateTime.Today, "Выдан", 10000));
+        site.Returns.Add(new ExternalReturn("456", DateTime.Today, "Аннулирован", "", "0", 10000));
+        var cash = Create("Диагностика", site: site);
+        var supplier = cash.AddSupplier("Форум");
+        cash.Link(supplier, "login", "password", DateTime.Today);
+        var path = await cash.DebugSiteAsync(supplier);
+        try
+        {
+            using var zip = System.IO.Compression.ZipFile.OpenRead(path);
+            using var reader = new StreamReader(zip.GetEntry("report.txt")!.Open());
+            var report = reader.ReadToEnd();
+            Assert.Contains("статус не «на баланс»", report);
+            Assert.Contains("ЖДЁТ ОПЛАТЫ", report);
+            Assert.Single(supplier.PendingOrders);
+            Assert.Equal(0, supplier.Balance);
+        }
+        finally { File.Delete(path); }
+    }
 
     private sealed class FakeNetwork
     {

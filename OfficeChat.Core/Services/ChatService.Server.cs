@@ -74,17 +74,20 @@ public sealed partial class ChatService
 
     private async void OnServerConnected()
     {
+        if (_disposed) return;
         Log.Info("Связь с сервером есть, журнал догнан");
         ShowDeferredPopups();
         try
         {
             var accounts = await _session!.Api.AccountsAsync();
+            if (_disposed) return;
             foreach (var entry in accounts) AddServerAccount(entry);
         }
         catch (Exception ex) when (ex is HttpRequestException or ServerApiException or TaskCanceledException)
         {
             Log.Warn("Не удалось получить список сотрудников", ex);
         }
+        if (_disposed) return;
         // То, что ждало прямой доставки этим собеседникам, теперь доставит сервер.
         foreach (var item in _outbox.Where(o => IsServerPeer(o.PeerId)).ToList())
         {
@@ -101,6 +104,7 @@ public sealed partial class ChatService
 
     private void OnServerDisconnected()
     {
+        if (_disposed) return;
         Log.Info("Связь с сервером пропала — пока работаем напрямую");
         foreach (var peerId in _serverAccounts)
             if (_discovery.Find(peerId) is { } peer) peer.ServerOnline = false;

@@ -32,6 +32,7 @@ public sealed class ServerConnection : IAsyncDisposable
     private int _rid;
     private long _ackedSeq;
     private long _processedSeq;
+    private int _stopping;
 
     /// <summary>Соединение установлено и журнал догнан.</summary>
     public bool IsConnected { get; private set; }
@@ -206,49 +207,54 @@ public sealed class ServerConnection : IAsyncDisposable
     /// <summary>Обработка входящих по одному, в UI-потоке.</summary>
     private async Task ProcessLoopAsync()
     {
-        await foreach (var frame in _incoming.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(true))
+        try
         {
-            try
+            await foreach (var frame in _incoming.Reader.ReadAllAsync(_stop.Token).ConfigureAwait(true))
             {
-                switch (frame.Op)
+                if (Volatile.Read(ref _stopping) != 0) break;
+                try
                 {
-                    case Ops.Event:
-                        // После переподключения журнал догоняется заново — уже обработанное пропускаем.
-                        if (frame.Seq is { } seq && seq <= _processedSeq) break;
-                        await _handleEvent(frame);
-                        _processedSeq = Math.Max(_processedSeq, frame.Seq ?? 0);
-                        // Подтверждаем пачкой: когда очередь разобрана.
-                        if (_incoming.Reader.Count == 0) Acknowledge();
-                        break;
-                    case Ops.Synced:
-                        Acknowledge();
-                        if (!IsConnected)
-                        {
-                            IsConnected = true;
-                            Connected?.Invoke();
-                        }
-                        break;
-                    case Ops.Presence when frame.AccountId is { } id:
-                        PresenceChanged?.Invoke(id, frame.Online == true);
-                        break;
-                    case Ops.Signal:
-                        SignalReceived?.Invoke(frame);
-                        break;
-                    case Ops.Directory when frame.Account is { } account:
-                        DirectoryChanged?.Invoke(account);
-                        break;
-                    case Ops.Legacy when frame.Data is { } data:
-                        LegacyMapped?.Invoke(data.Deserialize<List<LegacyMapping>>(ServerProtocol.Json) ?? new());
-                        break;
+                    switch (frame.Op)
+                    {
+                        case Ops.Event:
+                            // После переподключения журнал догоняется заново — уже обработанное пропускаем.
+                            if (frame.Seq is { } seq && seq <= _processedSeq) break;
+                            await _handleEvent(frame);
+                            _processedSeq = Math.Max(_processedSeq, frame.Seq ?? 0);
+                            // Подтверждаем пачкой: когда очередь разобрана.
+                            if (_incoming.Reader.Count == 0) Acknowledge();
+                            break;
+                        case Ops.Synced:
+                            Acknowledge();
+                            if (!IsConnected)
+                            {
+                                IsConnected = true;
+                                Connected?.Invoke();
+                            }
+                            break;
+                        case Ops.Presence when frame.AccountId is { } id:
+                            PresenceChanged?.Invoke(id, frame.Online == true);
+                            break;
+                        case Ops.Signal:
+                            SignalReceived?.Invoke(frame);
+                            break;
+                        case Ops.Directory when frame.Account is { } account:
+                            DirectoryChanged?.Invoke(account);
+                            break;
+                        case Ops.Legacy when frame.Data is { } data:
+                            LegacyMapped?.Invoke(data.Deserialize<List<LegacyMapping>>(ServerProtocol.Json) ?? new());
+                            break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Ошибка обработки одного события не должна останавливать синхронизацию.
+                    Log.Error($"Не удалось обработать «{frame.Op}/{frame.Kind}» от сервера", ex);
+                    _processedSeq = Math.Max(_processedSeq, frame.Seq ?? 0);
                 }
             }
-            catch (Exception ex)
-            {
-                // Ошибка обработки одного события не должна останавливать синхронизацию.
-                Log.Error($"Не удалось обработать «{frame.Op}/{frame.Kind}» от сервера", ex);
-                _processedSeq = Math.Max(_processedSeq, frame.Seq ?? 0);
-            }
         }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
     }
 
     private void Acknowledge()
@@ -285,30 +291,45 @@ public sealed class ServerConnection : IAsyncDisposable
 
     private void Post(Action action)
     {
-        if (_ui == null) action();
-        else _ui.Post(_ => action(), null);
+        // Событие могло попасть в очередь UI ещё до закрытия базы и выполняться уже после выхода.
+        void InvokeIfRunning()
+        {
+            if (Volatile.Read(ref _stopping) == 0) action();
+        }
+        if (_ui == null) InvokeIfRunning();
+        else _ui.Post(_ => InvokeIfRunning(), null);
     }
 
-    private Task<T> InvokeOnUiAsync<T>(Func<T> func)
+    private async Task<T> InvokeOnUiAsync<T>(Func<T> func)
     {
-        if (_ui == null) return Task.FromResult(func());
+        _stop.Token.ThrowIfCancellationRequested();
+        if (_ui == null) return func();
         var result = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Выход не должен ждать, пока UI выполнит уже ненужное чтение из базы.
+        using var registration = _stop.Token.Register(() => result.TrySetCanceled(_stop.Token));
         _ui.Post(_ =>
         {
+            if (Volatile.Read(ref _stopping) != 0)
+            {
+                result.TrySetCanceled();
+                return;
+            }
             try
             {
-                result.SetResult(func());
+                result.TrySetResult(func());
             }
             catch (Exception ex)
             {
-                result.SetException(ex);
+                result.TrySetException(ex);
             }
         }, null);
-        return result.Task;
+        return await result.Task.ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
     {
+        Interlocked.Exchange(ref _stopping, 1);
+        IsConnected = false;
         await _stop.CancelAsync();
         _incoming.Writer.TryComplete();
         if (_socket is { State: WebSocketState.Open } socket)
