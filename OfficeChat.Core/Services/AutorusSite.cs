@@ -11,12 +11,27 @@ public sealed class AutorusSite(Func<HttpMessageHandler>? handlerFactory = null)
 {
     public const string Id = "autorus";
 
+    public static string NormalizeLogin(string login)
+    {
+        var value = login.Trim();
+        if (value.Contains('@')) return value;
+        if (value.Any(c => !(c is >= '0' and <= '9') && !char.IsWhiteSpace(c) && c is not ('+' or '(' or ')' or '-')))
+            throw new SiteException("Авторусь: введите телефон или почту, используемые для входа на сайт.");
+        var digits = new string(value.Where(c => c is >= '0' and <= '9').ToArray());
+        if (digits.Length == 10) digits = "7" + digits;
+        if (digits.Length == 11 && digits[0] == '8') digits = "7" + digits[1..];
+        if (digits.Length != 11 || digits[0] != '7')
+            throw new SiteException("Авторусь: укажите полный номер телефона, например +7 (900) 000-00-00.");
+        return digits;
+    }
+
     public async Task<SiteData> FetchAsync(string login, string password, DateTime since,
         CancellationToken cancel, SiteDebug? debug = null)
     {
         debug?.HideSecret(password);
         debug?.HideSecret(WebUtility.HtmlEncode(password));
         debug?.HideSecret(WebUtility.UrlEncode(password));
+        login = NormalizeLogin(login);
         var cookies = new CookieContainer();
         using var handler = handlerFactory?.Invoke() ?? new HttpClientHandler
         {
@@ -43,6 +58,17 @@ public sealed class AutorusSite(Func<HttpMessageHandler>? handlerFactory = null)
         }
         try
         {
+            if (!login.Contains('@'))
+            {
+                debug?.Line("Вход по телефону: номер приведён к 11 цифрам; проверяем наличие учётной записи.");
+                var check = await Request("/gw/passport/spa/v1/profile/exist", new { phone = login }, "phone-check");
+                using var doc = JsonDocument.Parse(check);
+                if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object ||
+                    !data.TryGetProperty("exist", out var exists) || exists.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                    throw new SiteException("Авторусь: неожиданный ответ проверки телефона. См. отладку.");
+                if (!exists.GetBoolean())
+                    throw new SiteException("Авторусь: учётная запись с таким телефоном не найдена. Проверьте номер; регистрация выполняется на сайте.");
+            }
             var auth = await Request("/gw/passport/spa/v1/profile/login", new { login, password }, "auth");
             using (var doc = JsonDocument.Parse(auth))
             {

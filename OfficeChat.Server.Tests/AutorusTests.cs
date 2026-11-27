@@ -92,7 +92,7 @@ public class AutorusTests
             Assert.Equal("/gw/orders/v3/user-order/list?page=1", path);
             return Page(1, Enumerable.Repeat("Получен", 10).ToArray());
         }));
-        var result = await site.FetchAsync("test", "test-password", DateTime.MinValue, CancellationToken.None);
+        var result = await site.FetchAsync("test@example.com", "test-password", DateTime.MinValue, CancellationToken.None);
         Assert.Equal(2, calls.Count);
         Assert.Equal(10, result.Orders.Count);
         Assert.Empty(result.Returns);
@@ -103,7 +103,50 @@ public class AutorusTests
     public async Task Failed_login_cannot_be_treated_as_empty_orders()
     {
         var site = new AutorusSite(() => new Handler(_ => Task.FromResult("{\"data\":{\"isAuthorized\":false}}")));
-        await Assert.ThrowsAsync<SiteException>(() => site.FetchAsync("test", "test", DateTime.MinValue, CancellationToken.None));
+        await Assert.ThrowsAsync<SiteException>(() => site.FetchAsync("test@example.com", "test", DateTime.MinValue, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData("+7 (900) 000-00-00", "79000000000")]
+    [InlineData("8 900 000 00 00", "79000000000")]
+    [InlineData("9000000000", "79000000000")]
+    [InlineData("79000000000", "79000000000")]
+    [InlineData(" user@example.com ", "user@example.com")]
+    public void Login_is_normalized(string input, string expected) => Assert.Equal(expected, AutorusSite.NormalizeLogin(input));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("900")]
+    [InlineData("abc79000000000")]
+    public void Incomplete_phone_is_rejected(string input) => Assert.Throws<SiteException>(() => AutorusSite.NormalizeLogin(input));
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Phone_is_checked_before_password_and_missing_account_stops(bool exists)
+    {
+        var calls = new List<string>();
+        var site = new AutorusSite(() => new Handler(async request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            calls.Add(path);
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync());
+            if (calls.Count == 1)
+            {
+                Assert.Equal("/gw/passport/spa/v1/profile/exist", path);
+                Assert.Equal("79000000000", body.RootElement.GetProperty("phone").GetString());
+                Assert.False(body.RootElement.TryGetProperty("password", out _));
+                return JsonSerializer.Serialize(new { data = new { exist = exists } });
+            }
+            Assert.True(exists);
+            Assert.Equal("/gw/passport/spa/v1/profile/login", path);
+            Assert.Equal("79000000000", body.RootElement.GetProperty("login").GetString());
+            Assert.Equal("password", body.RootElement.GetProperty("password").GetString());
+            return "{\"data\":{\"isAuthorized\":false}}";
+        }));
+        var error = await Assert.ThrowsAsync<SiteException>(() => site.FetchAsync("+7 (900) 000-00-00", "password", DateTime.MinValue, CancellationToken.None));
+        Assert.Equal(exists ? 2 : 1, calls.Count);
+        Assert.Contains(exists ? "не подтвердил вход" : "не найдена", error.Message);
     }
 
     [Fact]

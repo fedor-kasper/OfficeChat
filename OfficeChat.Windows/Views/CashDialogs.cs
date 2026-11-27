@@ -93,6 +93,8 @@ public static class CashDialogs
         siteBox.SelectedIndex = siteId == AutorusSite.Id ? 2 : siteId == FavoritSite.Id ? 1 : 0;
         string SelectedSite() => (string)((ComboBoxItem)siteBox.SelectedItem).Tag;
         var loginBox = new TextBox { Text = login, MaxLength = 100, Padding = pad };
+        var loginLabel = Label(siteId == AutorusSite.Id ? "Телефон или почта Авторуси" : "Логин");
+        siteBox.SelectionChanged += (_, _) => loginLabel.Text = SelectedSite() == AutorusSite.Id ? "Телефон или почта Авторуси" : "Логин";
         var passwordBox = new PasswordBox { MaxLength = 200, Padding = pad };
         var sinceBox = new TextBox { Text = since.ToString("dd.MM.yyyy"), Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
         var balanceBox = new TextBox { Width = 140, Padding = pad, HorizontalAlignment = HorizontalAlignment.Left };
@@ -109,6 +111,11 @@ public static class CashDialogs
         var (buttons, _) = Buttons("Сохранить", window, () =>
         {
             var name = loginBox.Text.Trim();
+            if (SelectedSite() == AutorusSite.Id)
+            {
+                try { name = AutorusSite.NormalizeLogin(name); }
+                catch (SiteException ex) { error.Text = ex.Message; error.Visibility = Visibility.Visible; return false; }
+            }
             long? balance = null;
             error.Visibility = Visibility.Visible;
             if (name.Length == 0) error.Text = "Введите логин";
@@ -147,7 +154,8 @@ public static class CashDialogs
                 Hint("Для каждого сайта создайте отдельного поставщика. Отгрузки ждут ввода оплаты, возвраты пополняют баланс. " +
                      "У Фаворита учитывается только наличный договор б/н; оплаты сайта показываются для сверки. " +
                      "Авторусь: заказы до десяти подряд полученных; способ оплаты выбирается при записи."),
-                Label("Логин"), loginBox,
+                loginLabel, loginBox,
+                Hint("Авторусь: можно ввести телефон с +7, скобками и пробелами или почту. Ниже — пароль от сайта, не код из СМС."),
                 Label(linked ? "Пароль (оставьте пустым, чтобы не менять)" : "Пароль"), passwordBox,
                 Hint("Пароль хранится в журнале кассы зашифрованным кодом кассы — им пользуются все компьютеры этой кассы."),
                 Label("Учитывать заказы и возвраты с даты"), sinceBox,
